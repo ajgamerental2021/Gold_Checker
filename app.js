@@ -24,6 +24,8 @@ let activeTab = "dashboard";
 let toastTimer;
 let externalTrend = { points: [], status: "idle", thbRate: null, source: "CoinGecko PAX Gold", updatedAt: "" };
 
+markRuntimeShell();
+
 const el = {
   tabs: document.querySelectorAll(".tab"),
   panels: document.querySelectorAll(".panel"),
@@ -69,6 +71,12 @@ const el = {
 };
 
 init();
+
+function markRuntimeShell() {
+  const isNativeApp =
+    location.protocol === "capacitor:" || (location.protocol === "https:" && location.hostname === "localhost");
+  document.documentElement.classList.toggle("is-native-app", isNativeApp);
+}
 
 function init() {
   captureSheetWriteUrl();

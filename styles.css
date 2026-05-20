@@ -11,6 +11,8 @@
   --red: #b42318;
   --blue: #2563eb;
   --shadow: 0 18px 46px rgba(22, 34, 51, 0.1);
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 html {
@@ -24,6 +26,7 @@ html {
 body {
   margin: 0;
   min-height: 100vh;
+  min-height: 100svh;
   overflow-x: hidden;
   background: var(--bg);
   color: var(--ink);
@@ -41,6 +44,7 @@ button {
 
 .app-shell {
   min-height: 100vh;
+  min-height: 100svh;
   display: grid;
   grid-template-columns: 280px minmax(0, 1fr);
 }
@@ -52,6 +56,10 @@ button {
   display: flex;
   flex-direction: column;
   gap: 26px;
+}
+
+.is-native-app .sidebar {
+  padding-top: calc(24px + max(var(--safe-top), 34px));
 }
 
 .brand {
@@ -132,6 +140,7 @@ button {
 
 .content {
   padding: 24px;
+  padding-bottom: calc(24px + var(--safe-bottom));
   min-width: 0;
 }
 
@@ -568,6 +577,10 @@ canvas {
     gap: 14px;
   }
 
+  .is-native-app .sidebar {
+    padding-top: calc(14px + max(var(--safe-top), 34px));
+  }
+
   .tabs {
     width: 100%;
     grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -600,9 +613,16 @@ canvas {
   }
 }
 
+@media (max-width: 1120px) and (display-mode: standalone) {
+  .sidebar {
+    padding-top: calc(14px + max(var(--safe-top), 34px));
+  }
+}
+
 @media (max-width: 760px) {
   .content {
     padding: 14px;
+    padding-bottom: calc(14px + var(--safe-bottom));
   }
 
   .brand p,
