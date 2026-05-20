@@ -566,6 +566,21 @@ canvas {
   max-width: 100%;
   background: #fff;
   border-radius: 8px;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+  touch-action: none;
+}
+
+.chart-surface,
+.chart-surface * {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.chart-surface {
+  touch-action: pan-y;
 }
 
 @media (max-width: 1120px) {

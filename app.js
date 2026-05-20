@@ -994,9 +994,15 @@ function drawLineChart(canvas, points, options = {}) {
 function setupChartPointer(canvas) {
   if (canvas._chartPointerReady) return;
   canvas._chartPointerReady = true;
+  const preventSelection = (event) => event.preventDefault();
 
   canvas.addEventListener("pointermove", (event) => updateChartHover(canvas, event));
   canvas.addEventListener("pointerdown", (event) => updateChartHover(canvas, event));
+  canvas.addEventListener("contextmenu", preventSelection);
+  canvas.addEventListener("selectstart", preventSelection);
+  canvas.addEventListener("copy", preventSelection);
+  canvas.addEventListener("touchstart", preventSelection, { passive: false });
+  canvas.addEventListener("touchmove", preventSelection, { passive: false });
   canvas.addEventListener("pointerleave", () => {
     if (canvas._hoverIndex === null || canvas._hoverIndex === undefined) return;
     canvas._hoverIndex = null;
