@@ -13,6 +13,10 @@
   --shadow: 0 18px 46px rgba(22, 34, 51, 0.1);
 }
 
+html {
+  scrollbar-gutter: stable;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -534,22 +538,30 @@ canvas {
 @media (max-width: 1120px) {
   .app-shell {
     grid-template-columns: 1fr;
+    align-items: start;
   }
 
   .sidebar {
+    align-self: start;
     position: sticky;
     top: 0;
     z-index: 10;
     padding: 14px;
+    width: 100%;
+    min-height: 0;
+    gap: 14px;
   }
 
   .tabs {
-    grid-template-columns: repeat(4, 1fr);
+    width: 100%;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
   }
 
   .tab {
     justify-content: center;
     font-size: 13px;
+    min-width: 0;
   }
 
   .sidebar-footer {
