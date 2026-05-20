@@ -44,23 +44,11 @@ https://docs.google.com/spreadsheets/d/1i-619OKgmIHnBWapurp-_VfAx0dqh_cgcJBo-FHd
 
 ### เขียนราคากลับเข้า Google Sheet
 
-เว็บ/Android เขียนกลับเข้า Sheet ผ่าน Google Apps Script Web App:
-
-1. เปิด Google Sheet แล้วไปที่ `Extensions > Apps Script`
-2. วางโค้ดจาก `google-apps-script/Code.gs`
-3. กด `Deploy > New deployment`
-4. เลือกชนิด `Web app`
-5. ตั้ง `Execute as` เป็นตัวคุณเอง
-6. ตั้ง `Who has access` เป็น `Anyone`
-7. Deploy แล้ว copy Web App URL
-
-นำ URL มาเปิดแอพครั้งแรกแบบนี้เพื่อบันทึก endpoint ลงเครื่อง:
+เว็บ/Android เขียนกลับเข้า Sheet ผ่าน Google Apps Script Web App นี้ ซึ่งฝังไว้ในแอพแล้ว:
 
 ```text
-http://127.0.0.1:4173/?sheetWriteUrl=YOUR_APPS_SCRIPT_WEB_APP_URL
+https://script.google.com/macros/s/AKfycbz62Dw-RJkEBuQ_7lzJEdqJQBGulf1Ro7iQ6WlLmwh0gB3fM9bXl5OCdI2qIVLhkqtm/exec
 ```
-
-หรือใส่ URL ถาวรใน `SHEET_WRITE_WEB_APP_URL` ที่ `app.js` แล้ว build APK ใหม่
 
 เมื่อ Google Sheet `gid=484644725` ยังไม่มีราคาของวันนี้ แอพจะดึงราคาสด fallback แล้วส่งเข้า Sheet แบบ upsert ตามวันที่ จึงไม่เพิ่มซ้ำเมื่อกด refresh หลายครั้ง
 
