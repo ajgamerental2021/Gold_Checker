@@ -566,7 +566,7 @@ async function saveHoldingFromForm() {
     showToast(writeResult.configured ? "บันทึกรายการทองและซิงค์เข้า Sheet แล้ว" : "บันทึกรายการทองในเครื่องแล้ว");
   } catch (error) {
     console.error(error);
-    showToast("บันทึกในเครื่องแล้ว แต่ส่งเข้า Sheet ไม่สำเร็จ");
+    showToast(sheetWriteErrorMessage(error, "บันทึกในเครื่องแล้ว"));
   }
 }
 
@@ -591,8 +591,19 @@ async function deleteHolding(id) {
     );
   } catch (error) {
     console.error(error);
-    showToast("ลบไม่สำเร็จ กรุณาตรวจ Apps Script แล้วลองใหม่");
+    showToast(sheetWriteErrorMessage(error, "ลบไม่สำเร็จ"));
   }
+}
+
+function sheetWriteErrorMessage(error, prefix) {
+  const message = String(error?.message || "");
+  if (message.includes("Redeploy Code.gs")) {
+    return `${prefix} แต่ Apps Script ยังเป็นเวอร์ชันเก่า`;
+  }
+  if (message.includes("did not return JSON")) {
+    return `${prefix} แต่ Apps Script URL ยังไม่พร้อมใช้งาน`;
+  }
+  return `${prefix} แต่ส่งเข้า Sheet ไม่สำเร็จ`;
 }
 
 function render() {
