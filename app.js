@@ -670,6 +670,7 @@ function renderPrices() {
 
   const today = todayKey();
   const todayPrice = latestPriceForDate(today);
+  const todayParts = dateParts(today);
   const filtered = state.prices
     .filter((price) => {
       const parts = dateParts(price.date);
@@ -677,7 +678,11 @@ function renderPrices() {
     })
     .sort(comparePricesNewestFirst);
 
-  const rows = todayPrice && !filtered.some((price) => price.id === todayPrice.id) ? [todayPrice, ...filtered] : filtered;
+  const isCurrentMonth = selectedPriceMonth === todayParts.month && selectedPriceYear === todayParts.year;
+  const rows =
+    isCurrentMonth && todayPrice && !filtered.some((price) => price.id === todayPrice.id)
+      ? [todayPrice, ...filtered]
+      : filtered;
 
   if (!rows.length) {
     el.priceRows.innerHTML = `<tr><td colspan="5">ยังไม่มีราคาในเดือนที่เลือก</td></tr>`;
