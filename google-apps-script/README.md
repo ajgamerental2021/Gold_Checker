@@ -25,3 +25,7 @@ Deploy:
 - หาแถวจากคอลัมน์ `ลำดับ`
 - ถ้ามีลำดับเดิมจะอัพเดทแถวนั้น
 - ถ้าไม่มีจะ append แถวใหม่
+- รับ `GET ?payload=...` หรือ `POST` action `deleteHolding`
+- ลบรายการทองสะสมจาก sheet `gid=1394429920` โดยอิงคอลัมน์ `ลำดับ`
+
+หลังแก้ `Code.gs` ต้องไปที่ `Deploy > Manage deployments > Edit > New version > Deploy` เพื่อให้ URL เดิมใช้โค้ดล่าสุด

@@ -22,6 +22,10 @@ function handlePayload_(payload) {
     return upsertHolding_(payload.record || {});
   }
 
+  if (payload.action === "deleteHolding") {
+    return deleteHolding_(payload.record || {});
+  }
+
   return jsonResponse({ ok: false, error: "Unknown action" });
 }
 
@@ -44,7 +48,7 @@ function upsertDailyPrice_(record) {
       sheet.appendRow(values);
     }
 
-    return jsonResponse({ ok: true, row: rowIndex > 0 ? rowIndex : sheet.getLastRow() });
+    return jsonResponse({ ok: true, action: "upsertDailyPrice", row: rowIndex > 0 ? rowIndex : sheet.getLastRow() });
   } catch (error) {
     return jsonResponse({ ok: false, error: String(error && error.message ? error.message : error) });
   }
@@ -73,7 +77,24 @@ function upsertHolding_(record) {
       sheet.appendRow(values);
     }
 
-    return jsonResponse({ ok: true, sequence: sequence, row: rowIndex > 0 ? rowIndex : sheet.getLastRow() });
+    return jsonResponse({ ok: true, action: "upsertHolding", sequence: sequence, row: rowIndex > 0 ? rowIndex : sheet.getLastRow() });
+  } catch (error) {
+    return jsonResponse({ ok: false, error: String(error && error.message ? error.message : error) });
+  }
+}
+
+function deleteHolding_(record) {
+  try {
+    const sheet = sheetByGid_(HOLDINGS_GID);
+    ensureHeaders_(sheet, HOLDING_HEADERS);
+    const rowIndex = findRowByValue_(sheet, 1, record.sequence);
+
+    if (rowIndex < 0) {
+      return jsonResponse({ ok: true, action: "deleteHolding", deleted: false, sequence: record.sequence, message: "Holding sequence not found" });
+    }
+
+    sheet.deleteRow(rowIndex);
+    return jsonResponse({ ok: true, action: "deleteHolding", deleted: true, sequence: record.sequence, row: rowIndex });
   } catch (error) {
     return jsonResponse({ ok: false, error: String(error && error.message ? error.message : error) });
   }

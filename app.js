@@ -307,9 +307,7 @@ async function writeDailyPriceToSheet(price) {
     },
   };
 
-  await sendSheetWritePayload(payload);
-
-  return { configured: true, sent: true };
+  return sendSheetWritePayload(payload);
 }
 
 async function writeHoldingToSheet(item) {
@@ -332,16 +330,57 @@ async function writeHoldingToSheet(item) {
     },
   };
 
-  await sendSheetWritePayload(payload);
+  return sendSheetWritePayload(payload);
+}
 
-  return { configured: true, sent: true };
+async function deleteHoldingFromSheet(item) {
+  const url = getSheetWriteUrl();
+  if (!url) return { configured: false, sent: false };
+
+  const payload = {
+    action: "deleteHolding",
+    sheetId: GOOGLE_SHEET_ID,
+    gid: HOLDINGS_GID,
+    record: {
+      sequence: item.sequence,
+      name: item.name,
+    },
+  };
+
+  return sendSheetWritePayload(payload);
 }
 
 async function sendSheetWritePayload(payload) {
   const url = getSheetWriteUrl();
   const separator = url.includes("?") ? "&" : "?";
   const requestUrl = `${url}${separator}payload=${encodeURIComponent(JSON.stringify(payload))}&cachebust=${Date.now()}`;
-  await fetch(requestUrl, { method: "GET", mode: "no-cors", cache: "no-store" });
+  const response = await fetch(requestUrl, { method: "GET", cache: "no-store" });
+  const text = await response.text();
+  let result;
+
+  try {
+    result = JSON.parse(text);
+  } catch {
+    throw new Error("Apps Script did not return JSON. Check deployment access.");
+  }
+
+  if (!response.ok || result.ok === false) {
+    throw new Error(result.error || `Apps Script returned ${response.status}`);
+  }
+
+  if (!isExpectedSheetWriteResult(payload.action, result)) {
+    throw new Error(`Apps Script deployment did not handle ${payload.action}. Redeploy Code.gs as a new Web App version.`);
+  }
+
+  return { configured: true, sent: true, verified: true, result };
+}
+
+function isExpectedSheetWriteResult(action, result) {
+  if (!result || result.ok !== true) return false;
+  if (action === "upsertDailyPrice") return Object.prototype.hasOwnProperty.call(result, "row");
+  if (action === "upsertHolding") return Object.prototype.hasOwnProperty.call(result, "sequence");
+  if (action === "deleteHolding") return Object.prototype.hasOwnProperty.call(result, "deleted");
+  return false;
 }
 
 async function fetchLiveThaiGoldPrice() {
@@ -516,10 +555,35 @@ async function saveHoldingFromForm() {
 
   try {
     const writeResult = await writeHoldingToSheet(item);
-    showToast(writeResult.configured ? "บันทึกรายการทองและส่งเข้า Sheet แล้ว" : "บันทึกรายการทองในเครื่องแล้ว");
+    showToast(writeResult.configured ? "บันทึกรายการทองและซิงค์เข้า Sheet แล้ว" : "บันทึกรายการทองในเครื่องแล้ว");
   } catch (error) {
     console.error(error);
     showToast("บันทึกในเครื่องแล้ว แต่ส่งเข้า Sheet ไม่สำเร็จ");
+  }
+}
+
+async function deleteHolding(id) {
+  const item = state.holdings.find((holding) => holding.id === id);
+  if (!item) return;
+
+  const confirmed = window.confirm(`ยืนยันลบรายการ "${item.name}" หรือไม่?\nรายการนี้จะถูกลบทั้งในแอพและ Google Sheet`);
+  if (!confirmed) return;
+
+  try {
+    const writeResult = await deleteHoldingFromSheet(item);
+    state.holdings = state.holdings.filter((holding) => holding.id !== id);
+    persist();
+    render();
+    showToast(
+      writeResult.configured && writeResult.result?.deleted === false
+        ? "ลบรายการจากแอพแล้ว แต่ใน Sheet ไม่พบแถวนี้"
+        : writeResult.configured
+          ? "ลบรายการจากแอพและ Sheet แล้ว"
+          : "ลบรายการจากแอพแล้ว",
+    );
+  } catch (error) {
+    console.error(error);
+    showToast("ลบไม่สำเร็จ กรุณาตรวจ Apps Script แล้วลองใหม่");
   }
 }
 
@@ -613,6 +677,7 @@ function renderHoldings() {
             </div>
             <div class="card-actions">
               <button class="mini-button" type="button" data-edit-holding="${item.id}" title="แก้ไข">✎</button>
+              <button class="mini-button danger-mini-button" type="button" data-delete-holding="${item.id}" title="ลบ">ลบ</button>
             </div>
           </header>
           <div class="holding-stats">
@@ -629,6 +694,10 @@ function renderHoldings() {
 
   el.holdingCards.querySelectorAll("[data-edit-holding]").forEach((button) => {
     button.addEventListener("click", () => openHoldingForm(state.holdings.find((holding) => holding.id === button.dataset.editHolding)));
+  });
+
+  el.holdingCards.querySelectorAll("[data-delete-holding]").forEach((button) => {
+    button.addEventListener("click", () => deleteHolding(button.dataset.deleteHolding));
   });
 }
 
@@ -756,11 +825,18 @@ function drawLineChart(canvas, points, options = {}) {
   const ctx = canvas.getContext("2d");
   const ratio = window.devicePixelRatio || 1;
   const rect = canvas.getBoundingClientRect();
-  const width = Math.max(rect.width, 320);
-  const height = Number(canvas.getAttribute("height")) || 260;
-  canvas.width = width * ratio;
-  canvas.height = height * ratio;
-  ctx.scale(ratio, ratio);
+  const parentStyle = canvas.parentElement ? window.getComputedStyle(canvas.parentElement) : null;
+  const parentPadding =
+    (Number.parseFloat(parentStyle?.paddingLeft) || 0) + (Number.parseFloat(parentStyle?.paddingRight) || 0);
+  const parentWidth = canvas.parentElement ? Math.max(0, canvas.parentElement.clientWidth - parentPadding) : 0;
+  const width = Math.max(Math.floor(Math.max(rect.width || 0, parentWidth, 320)), 280);
+  if (!canvas.dataset.baseHeight) canvas.dataset.baseHeight = canvas.getAttribute("height") || "260";
+  const height = Number(canvas.dataset.baseHeight) || 260;
+  canvas.style.width = `${width}px`;
+  canvas.style.height = `${height}px`;
+  canvas.width = Math.round(width * ratio);
+  canvas.height = Math.round(height * ratio);
+  ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
   ctx.clearRect(0, 0, width, height);
 
   ctx.fillStyle = "#fff";
