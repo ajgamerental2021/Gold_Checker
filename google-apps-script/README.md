@@ -15,8 +15,13 @@ Deploy:
 
 การทำงาน:
 
-- รับ `POST` action `upsertDailyPrice`
+- รับ `GET ?payload=...` หรือ `POST` action `upsertDailyPrice`
 - เขียนลง sheet `gid=484644725`
 - หาแถวจากคอลัมน์ `วันที่`
 - ถ้ามีวันที่เดิมจะอัพเดทแถวนั้น
+- ถ้าไม่มีจะ append แถวใหม่
+- รับ `GET ?payload=...` หรือ `POST` action `upsertHolding`
+- เขียนลง sheet `gid=1394429920`
+- หาแถวจากคอลัมน์ `ลำดับ`
+- ถ้ามีลำดับเดิมจะอัพเดทแถวนั้น
 - ถ้าไม่มีจะ append แถวใหม่

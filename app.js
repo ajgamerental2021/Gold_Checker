@@ -1,7 +1,7 @@
 const STORAGE_KEY = "aza-gold-state-v1";
 const NOTIFICATION_LOG_KEY = "aza-gold-notification-log-v1";
 const GOOGLE_SHEET_ID = "1i-619OKgmIHnBWapurp-_VfAx0dqh_cgcJBo-FHdeXw";
-const HOLDINGS_GID = "0";
+const HOLDINGS_GID = "1394429920";
 const DAILY_PRICES_GID = "484644725";
 const SHEET_WRITE_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbz62Dw-RJkEBuQ_7lzJEdqJQBGulf1Ro7iQ6WlLmwh0gB3fM9bXl5OCdI2qIVLhkqtm/exec";
 const SHEET_WRITE_WEB_APP_URL_KEY = "aza-gold-sheet-write-web-app-url";
@@ -91,9 +91,9 @@ function setupEvents() {
     el.holdingNotifyDate.required = el.holdingNotify.checked;
   });
 
-  el.holdingForm.addEventListener("submit", (event) => {
+  el.holdingForm.addEventListener("submit", async (event) => {
     event.preventDefault();
-    saveHoldingFromForm();
+    await saveHoldingFromForm();
   });
 
   el.enableNotifications.addEventListener("click", async () => {
@@ -184,7 +184,8 @@ async function fetchSheetHoldings() {
       const buyPrice = parseNumber(cell(row, "ราคาซื้อรวม"));
       if (!name || !weightBaht || !buyPrice) return null;
       return {
-        id: `sheet-holding-${index + 1}`,
+        id: `sheet-holding-${cell(row, "ลำดับ") || index + 1}`,
+        sequence: cell(row, "ลำดับ") || String(index + 1),
         name,
         weightBaht,
         buyPrice,
@@ -244,14 +245,41 @@ async function writeDailyPriceToSheet(price) {
     },
   };
 
-  await fetch(url, {
-    method: "POST",
-    mode: "no-cors",
-    headers: { "Content-Type": "text/plain;charset=utf-8" },
-    body: JSON.stringify(payload),
-  });
+  await sendSheetWritePayload(payload);
 
   return { configured: true, sent: true };
+}
+
+async function writeHoldingToSheet(item) {
+  const url = getSheetWriteUrl();
+  if (!url) return { configured: false, sent: false };
+
+  const payload = {
+    action: "upsertHolding",
+    sheetId: GOOGLE_SHEET_ID,
+    gid: HOLDINGS_GID,
+    record: {
+      sequence: item.sequence,
+      name: item.name,
+      weightBaht: item.weightBaht,
+      buyPrice: item.buyPrice,
+      sellPrice: item.sellPrice,
+      purchaseDate: item.purchaseDate,
+      notifySell: item.notifySell,
+      notifyDate: item.notifyDate,
+    },
+  };
+
+  await sendSheetWritePayload(payload);
+
+  return { configured: true, sent: true };
+}
+
+async function sendSheetWritePayload(payload) {
+  const url = getSheetWriteUrl();
+  const separator = url.includes("?") ? "&" : "?";
+  const requestUrl = `${url}${separator}payload=${encodeURIComponent(JSON.stringify(payload))}&cachebust=${Date.now()}`;
+  await fetch(requestUrl, { method: "GET", mode: "no-cors", cache: "no-store" });
 }
 
 async function fetchLiveThaiGoldPrice() {
@@ -397,10 +425,12 @@ function closeHoldingForm() {
   el.holdingForm.classList.add("hidden");
 }
 
-function saveHoldingFromForm() {
+async function saveHoldingFromForm() {
   const id = el.holdingId.value || crypto.randomUUID();
+  const existing = state.holdings.find((holding) => holding.id === id);
   const item = {
     id,
+    sequence: existing?.sequence || nextHoldingSequence(),
     name: el.holdingName.value.trim(),
     weightBaht: Number(el.holdingWeight.value),
     buyPrice: Number(el.holdingBuyPrice.value),
@@ -421,7 +451,14 @@ function saveHoldingFromForm() {
   persist();
   closeHoldingForm();
   render();
-  showToast("บันทึกรายการทองแล้ว");
+
+  try {
+    const writeResult = await writeHoldingToSheet(item);
+    showToast(writeResult.configured ? "บันทึกรายการทองและส่งเข้า Sheet แล้ว" : "บันทึกรายการทองในเครื่องแล้ว");
+  } catch (error) {
+    console.error(error);
+    showToast("บันทึกในเครื่องแล้ว แต่ส่งเข้า Sheet ไม่สำเร็จ");
+  }
 }
 
 function render() {
@@ -833,6 +870,14 @@ function captureSheetWriteUrl() {
 
 function getSheetWriteUrl() {
   return (localStorage.getItem(SHEET_WRITE_WEB_APP_URL_KEY) || SHEET_WRITE_WEB_APP_URL).trim();
+}
+
+function nextHoldingSequence() {
+  const maxSequence = state.holdings.reduce((max, holding, index) => {
+    const numeric = Number(holding.sequence);
+    return Math.max(max, Number.isFinite(numeric) ? numeric : index + 1);
+  }, 0);
+  return String(maxSequence + 1);
 }
 
 function csvToObjects(csv) {

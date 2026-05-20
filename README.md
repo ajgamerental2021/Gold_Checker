@@ -35,7 +35,7 @@ npm run android:apk
 https://docs.google.com/spreadsheets/d/1i-619OKgmIHnBWapurp-_VfAx0dqh_cgcJBo-FHdeXw/edit?usp=sharing
 ```
 
-- `gid=0` สำหรับทองที่สะสม
+- `gid=1394429920` สำหรับทองที่สะสม
   - Header: `ลำดับ,รายการ,จำนวนบาท,ราคาซื้อรวม,ราคาขายรวม,วันที่ซื้อ,แจ้งเตือนขาย,วันที่แจ้งเตือน`
 - `gid=484644725` สำหรับราคาทองรายวัน
   - Header: `วันที่,เวลา,รับซื้อ,ขาย,แหล่งข้อมูล`
@@ -51,6 +51,10 @@ https://script.google.com/macros/s/AKfycbz62Dw-RJkEBuQ_7lzJEdqJQBGulf1Ro7iQ6WlLm
 ```
 
 เมื่อ Google Sheet `gid=484644725` ยังไม่มีราคาของวันนี้ แอพจะดึงราคาสด fallback แล้วส่งเข้า Sheet แบบ upsert ตามวันที่ จึงไม่เพิ่มซ้ำเมื่อกด refresh หลายครั้ง
+
+เมื่อเพิ่มหรือแก้ไข `ทองที่สะสม` แอพจะส่งเข้า Google Sheet `gid=1394429920` ผ่าน action `upsertHolding` โดยใช้คอลัมน์ `ลำดับ` เป็นตัวระบุแถว
+
+หลังแก้ `google-apps-script/Code.gs` ต้อง deploy Web App version ใหม่ใน Apps Script เพื่อให้ endpoint เดิมรองรับ action ล่าสุด
 
 ## Features
 

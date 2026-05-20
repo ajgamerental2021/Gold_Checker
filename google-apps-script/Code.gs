@@ -1,15 +1,32 @@
 const SPREADSHEET_ID = "1i-619OKgmIHnBWapurp-_VfAx0dqh_cgcJBo-FHdeXw";
+const HOLDINGS_GID = 1394429920;
 const DAILY_PRICES_GID = 484644725;
+const HOLDING_HEADERS = ["ลำดับ", "รายการ", "จำนวนบาท", "ราคาซื้อรวม", "ราคาขายรวม", "วันที่ซื้อ", "แจ้งเตือนขาย", "วันที่แจ้งเตือน"];
 const DAILY_PRICE_HEADERS = ["วันที่", "เวลา", "รับซื้อ", "ขาย", "แหล่งข้อมูล"];
 
 function doPost(e) {
   try {
     const payload = JSON.parse(e.postData.contents || "{}");
-    if (payload.action !== "upsertDailyPrice") {
-      return jsonResponse({ ok: false, error: "Unknown action" });
-    }
+    return handlePayload_(payload);
+  } catch (error) {
+    return jsonResponse({ ok: false, error: String(error && error.message ? error.message : error) });
+  }
+}
 
-    const record = payload.record || {};
+function handlePayload_(payload) {
+  if (payload.action === "upsertDailyPrice") {
+    return upsertDailyPrice_(payload.record || {});
+  }
+
+  if (payload.action === "upsertHolding") {
+    return upsertHolding_(payload.record || {});
+  }
+
+  return jsonResponse({ ok: false, error: "Unknown action" });
+}
+
+function upsertDailyPrice_(record) {
+  try {
     const sheet = sheetByGid_(DAILY_PRICES_GID);
     ensureHeaders_(sheet, DAILY_PRICE_HEADERS);
     const rowIndex = findRowByDate_(sheet, record.date);
@@ -33,7 +50,44 @@ function doPost(e) {
   }
 }
 
-function doGet() {
+function upsertHolding_(record) {
+  try {
+    const sheet = sheetByGid_(HOLDINGS_GID);
+    ensureHeaders_(sheet, HOLDING_HEADERS);
+    const sequence = record.sequence || nextSequence_(sheet);
+    const rowIndex = findRowByValue_(sheet, 1, sequence);
+    const values = [
+      sequence,
+      record.name || "",
+      Number(record.weightBaht) || 0,
+      Number(record.buyPrice) || 0,
+      record.sellPrice === null || record.sellPrice === undefined || record.sellPrice === "" ? "" : Number(record.sellPrice),
+      record.purchaseDate || "",
+      record.notifySell ? "ใช่" : "ไม่",
+      record.notifyDate || "",
+    ];
+
+    if (rowIndex > 0) {
+      sheet.getRange(rowIndex, 1, 1, values.length).setValues([values]);
+    } else {
+      sheet.appendRow(values);
+    }
+
+    return jsonResponse({ ok: true, sequence: sequence, row: rowIndex > 0 ? rowIndex : sheet.getLastRow() });
+  } catch (error) {
+    return jsonResponse({ ok: false, error: String(error && error.message ? error.message : error) });
+  }
+}
+
+function doGet(e) {
+  if (e && e.parameter && e.parameter.payload) {
+    try {
+      return handlePayload_(JSON.parse(e.parameter.payload));
+    } catch (error) {
+      return jsonResponse({ ok: false, error: String(error && error.message ? error.message : error) });
+    }
+  }
+
   return jsonResponse({ ok: true, app: "AzA Gold Sheet Writer" });
 }
 
@@ -61,6 +115,27 @@ function findRowByDate_(sheet, dateText) {
     }
   }
   return -1;
+}
+
+function findRowByValue_(sheet, column, value) {
+  if (!value || sheet.getLastRow() < 2) return -1;
+  const values = sheet.getRange(2, column, sheet.getLastRow() - 1, 1).getDisplayValues();
+  for (let index = 0; index < values.length; index += 1) {
+    if (String(values[index][0]).trim() === String(value).trim()) {
+      return index + 2;
+    }
+  }
+  return -1;
+}
+
+function nextSequence_(sheet) {
+  if (sheet.getLastRow() < 2) return "1";
+  const values = sheet.getRange(2, 1, sheet.getLastRow() - 1, 1).getDisplayValues();
+  const max = values.reduce((currentMax, row) => {
+    const numeric = Number(row[0]);
+    return Math.max(currentMax, Number.isFinite(numeric) ? numeric : 0);
+  }, 0);
+  return String(max + 1);
 }
 
 function normalizeDate_(value) {
