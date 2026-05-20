@@ -3,8 +3,8 @@ const NOTIFICATION_LOG_KEY = "aza-gold-notification-log-v1";
 const GOOGLE_SHEET_ID = "1i-619OKgmIHnBWapurp-_VfAx0dqh_cgcJBo-FHdeXw";
 const HOLDINGS_GID = "1394429920";
 const DAILY_PRICES_GID = "484644725";
-const SHEET_WRITE_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbz62Dw-RJkEBuQ_7lzJEdqJQBGulf1Ro7iQ6WlLmwh0gB3fM9bXl5OCdI2qIVLhkqtm/exec";
-const SHEET_WRITE_WEB_APP_URL_KEY = "aza-gold-sheet-write-web-app-url";
+const SHEET_WRITE_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbx2SBfa1psYi0g6ZYn9HWAixSK2bTwlbZ-HsxYe4NB8_kYAecqU0oMwLBO5BaXRzvzq/exec";
+const SHEET_WRITE_WEB_APP_URL_KEY = "aza-gold-sheet-write-web-app-url-v2";
 const THAI_GOLD_BAHT_GRAMS = 15.244;
 const TROY_OUNCE_GRAMS = 31.1034768;
 const GOLD_PURITY = 0.965;
@@ -23,6 +23,8 @@ let state = loadState();
 let activeTab = "dashboard";
 let toastTimer;
 let externalTrend = { points: [], status: "idle", thbRate: null, source: "CoinGecko PAX Gold", updatedAt: "" };
+let selectedPriceMonth = new Date().getMonth() + 1;
+let selectedPriceYear = new Date().getFullYear();
 
 markRuntimeShell();
 
@@ -50,6 +52,8 @@ const el = {
   externalTrendChart: document.querySelector("#externalTrendChart"),
   externalTrendSummary: document.querySelector("#externalTrendSummary"),
   externalTrendSource: document.querySelector("#externalTrendSource"),
+  priceMonth: document.querySelector("#priceMonth"),
+  priceYear: document.querySelector("#priceYear"),
   priceRows: document.querySelector("#priceRows"),
   newHolding: document.querySelector("#newHolding"),
   holdingForm: document.querySelector("#holdingForm"),
@@ -124,6 +128,14 @@ function setupEvents() {
 
   el.exportData.addEventListener("click", exportBackup);
   el.importData.addEventListener("change", importBackup);
+  el.priceMonth.addEventListener("change", () => {
+    selectedPriceMonth = Number(el.priceMonth.value);
+    renderPrices();
+  });
+  el.priceYear.addEventListener("change", () => {
+    selectedPriceYear = Number(el.priceYear.value);
+    renderPrices();
+  });
   window.addEventListener("resize", renderCharts);
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden) checkDueNotifications();
@@ -649,12 +661,30 @@ function renderDashboard() {
 }
 
 function renderPrices() {
+  renderPriceFilters();
+
   if (!state.prices.length) {
     el.priceRows.innerHTML = `<tr><td colspan="5">ยังไม่มีประวัติราคา</td></tr>`;
     return;
   }
 
-  el.priceRows.innerHTML = state.prices
+  const today = todayKey();
+  const todayPrice = latestPriceForDate(today);
+  const filtered = state.prices
+    .filter((price) => {
+      const parts = dateParts(price.date);
+      return parts.month === selectedPriceMonth && parts.year === selectedPriceYear;
+    })
+    .sort(comparePricesNewestFirst);
+
+  const rows = todayPrice && !filtered.some((price) => price.id === todayPrice.id) ? [todayPrice, ...filtered] : filtered;
+
+  if (!rows.length) {
+    el.priceRows.innerHTML = `<tr><td colspan="5">ยังไม่มีราคาในเดือนที่เลือก</td></tr>`;
+    return;
+  }
+
+  el.priceRows.innerHTML = rows
     .map(
       (price) => `
         <tr>
@@ -666,6 +696,22 @@ function renderPrices() {
         </tr>
       `,
     )
+    .join("");
+}
+
+function renderPriceFilters() {
+  const today = new Date();
+  const years = Array.from(
+    new Set([today.getFullYear(), ...state.prices.map((price) => dateParts(price.date).year).filter(Boolean)]),
+  ).sort((a, b) => b - a);
+
+  el.priceMonth.innerHTML = Array.from({ length: 12 }, (_, index) => {
+    const value = index + 1;
+    return `<option value="${value}" ${value === selectedPriceMonth ? "selected" : ""}>${thaiMonthName(value)}</option>`;
+  }).join("");
+
+  el.priceYear.innerHTML = years
+    .map((year) => `<option value="${year}" ${year === selectedPriceYear ? "selected" : ""}>${year + 543}</option>`)
     .join("");
 }
 
@@ -774,7 +820,7 @@ function renderCharts() {
 function drawPriceChart() {
   const canvas = el.priceChart;
   const prices = [...state.prices].sort((a, b) => a.date.localeCompare(b.date));
-  drawLineChart(canvas, prices.map((item) => ({ label: formatShortDate(item.date), value: item.sell })), {
+  drawLineChart(canvas, prices.map((item) => ({ label: formatShortDate(item.date), tooltipLabel: `${formatShortDate(item.date)} ${item.time || ""}`.trim(), value: item.sell })), {
     color: "#c28a11",
     fill: "rgba(194, 138, 17, 0.12)",
     emptyText: "ยังไม่มีข้อมูลราคา",
@@ -791,6 +837,7 @@ function drawForecastChart() {
   const points = [{ label: "วันนี้", value: price.sell }].concat(
     FORECAST_HORIZONS.map((horizon) => ({
       label: horizon.label,
+      tooltipLabel: horizon.label,
       value: projectPrice(price.sell, horizon.days, trend.annualRate),
     })),
   );
@@ -830,6 +877,7 @@ function drawExternalTrendChart() {
 
   const points = externalTrend.points.map((point, index) => ({
     label: index === 0 || index === externalTrend.points.length - 1 ? formatShortDate(point.date) : "",
+    tooltipLabel: formatShortDate(point.date),
     value: point.value,
   }));
 
@@ -871,6 +919,8 @@ function drawLineChart(canvas, points, options = {}) {
   }
 
   if (!points.length) {
+    canvas._chartData = { points, options, coordinates: [], width, height };
+    setupChartPointer(canvas);
     ctx.fillStyle = "#667085";
     ctx.font = "14px system-ui";
     ctx.fillText(options.emptyText || "ไม่มีข้อมูล", 48, height / 2);
@@ -885,6 +935,9 @@ function drawLineChart(canvas, points, options = {}) {
   const chartHeight = height - 62;
   const xFor = (index) => 48 + (points.length === 1 ? 0 : index * (chartWidth / (points.length - 1)));
   const yFor = (value) => 22 + chartHeight - ((value - min) / range) * chartHeight;
+  const coordinates = points.map((point, index) => ({ x: xFor(index), y: yFor(point.value), point, index }));
+  canvas._chartData = { points, options, coordinates, width, height };
+  setupChartPointer(canvas);
 
   ctx.fillStyle = "#667085";
   ctx.font = "12px system-ui";
@@ -916,8 +969,7 @@ function drawLineChart(canvas, points, options = {}) {
   ctx.stroke();
 
   points.forEach((point, index) => {
-    const x = xFor(index);
-    const y = yFor(point.value);
+    const { x, y } = coordinates[index];
     ctx.beginPath();
     ctx.arc(x, y, 4, 0, Math.PI * 2);
     ctx.fillStyle = options.color || "#c28a11";
@@ -928,6 +980,96 @@ function drawLineChart(canvas, points, options = {}) {
       ctx.fillText(point.label, Math.min(x, width - 82), height - 12);
     }
   });
+
+  if (canvas._hoverIndex !== null && canvas._hoverIndex !== undefined && coordinates[canvas._hoverIndex]) {
+    drawChartTooltip(ctx, coordinates[canvas._hoverIndex], width, height, options.color || "#c28a11");
+  }
+}
+
+function setupChartPointer(canvas) {
+  if (canvas._chartPointerReady) return;
+  canvas._chartPointerReady = true;
+
+  canvas.addEventListener("pointermove", (event) => updateChartHover(canvas, event));
+  canvas.addEventListener("pointerdown", (event) => updateChartHover(canvas, event));
+  canvas.addEventListener("pointerleave", () => {
+    if (canvas._hoverIndex === null || canvas._hoverIndex === undefined) return;
+    canvas._hoverIndex = null;
+    drawLineChart(canvas, canvas._chartData?.points || [], canvas._chartData?.options || {});
+  });
+}
+
+function updateChartHover(canvas, event) {
+  const data = canvas._chartData;
+  if (!data?.coordinates?.length) return;
+
+  const rect = canvas.getBoundingClientRect();
+  const x = event.clientX - rect.left;
+  const y = event.clientY - rect.top;
+  const nearest = data.coordinates.reduce(
+    (best, coordinate) => {
+      const distance = Math.hypot(coordinate.x - x, coordinate.y - y);
+      return distance < best.distance ? { index: coordinate.index, distance } : best;
+    },
+    { index: null, distance: Number.POSITIVE_INFINITY },
+  );
+  const nextIndex = nearest.distance <= 24 ? nearest.index : null;
+
+  if (canvas._hoverIndex === nextIndex) return;
+  canvas._hoverIndex = nextIndex;
+  drawLineChart(canvas, data.points, data.options);
+}
+
+function drawChartTooltip(ctx, coordinate, width, height, color) {
+  const label = coordinate.point.tooltipLabel || coordinate.point.label || "";
+  const value = money(coordinate.point.value);
+  const paddingX = 10;
+  ctx.font = "12px system-ui";
+  const labelWidth = ctx.measureText(label).width;
+  ctx.font = "700 14px system-ui";
+  const valueWidth = ctx.measureText(value).width;
+  const tooltipWidth = Math.max(labelWidth, valueWidth) + paddingX * 2;
+  const tooltipHeight = 48;
+  const x = Math.min(Math.max(8, coordinate.x - tooltipWidth / 2), width - tooltipWidth - 8);
+  const y = coordinate.y > 72 ? coordinate.y - tooltipHeight - 14 : coordinate.y + 14;
+
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(coordinate.x, 24);
+  ctx.lineTo(coordinate.x, height - 38);
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.arc(coordinate.x, coordinate.y, 7, 0, Math.PI * 2);
+  ctx.fillStyle = "#fff";
+  ctx.fill();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 3;
+  ctx.stroke();
+
+  roundedRect(ctx, x, y, tooltipWidth, tooltipHeight, 8);
+  ctx.fillStyle = "#111827";
+  ctx.fill();
+  ctx.fillStyle = "#fff";
+  ctx.font = "12px system-ui";
+  ctx.fillText(label, x + paddingX, y + 18);
+  ctx.font = "700 14px system-ui";
+  ctx.fillText(value, x + paddingX, y + 37);
+}
+
+function roundedRect(ctx, x, y, width, height, radius) {
+  ctx.beginPath();
+  ctx.moveTo(x + radius, y);
+  ctx.lineTo(x + width - radius, y);
+  ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+  ctx.lineTo(x + width, y + height - radius);
+  ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+  ctx.lineTo(x + radius, y + height);
+  ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+  ctx.lineTo(x, y + radius);
+  ctx.quadraticCurveTo(x, y, x + radius, y);
+  ctx.closePath();
 }
 
 function calculatePortfolio() {
@@ -964,11 +1106,26 @@ function projectPrice(currentPrice, days, annualRate) {
 }
 
 function latestPrice() {
-  return [...state.prices].sort((a, b) => `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`))[0] || null;
+  return [...state.prices].sort(comparePricesNewestFirst)[0] || null;
 }
 
 function latestPriceForDate(date) {
-  return state.prices.find((price) => price.date === date) || null;
+  return state.prices.filter((price) => price.date === date).sort(comparePricesNewestFirst)[0] || null;
+}
+
+function comparePricesNewestFirst(a, b) {
+  return `${b.date} ${b.time || ""}`.localeCompare(`${a.date} ${a.time || ""}`);
+}
+
+function dateParts(dateString) {
+  const match = String(dateString || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return { year: 0, month: 0, day: 0 };
+  return { year: Number(match[1]), month: Number(match[2]), day: Number(match[3]) };
+}
+
+function thaiMonthName(month) {
+  const date = new Date(2026, month - 1, 1);
+  return new Intl.DateTimeFormat("th-TH", { month: "long" }).format(date);
 }
 
 function scheduleNotificationChecks() {
