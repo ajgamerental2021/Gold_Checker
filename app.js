@@ -5,6 +5,10 @@ const HOLDINGS_GID = "1394429920";
 const DAILY_PRICES_GID = "484644725";
 const SHEET_WRITE_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbx2SBfa1psYi0g6ZYn9HWAixSK2bTwlbZ-HsxYe4NB8_kYAecqU0oMwLBO5BaXRzvzq/exec";
 const SHEET_WRITE_WEB_APP_URL_KEY = "aza-gold-sheet-write-web-app-url-v2";
+const NATIVE_NOTIFICATION_CHANNEL_ID = "aza-gold-alerts";
+const NATIVE_NOTIFICATION_ID_MIN = 860000;
+const NATIVE_NOTIFICATION_ID_MAX = 999999;
+const DAILY_NOTIFICATION_ID = 860001;
 const THAI_GOLD_BAHT_GRAMS = 15.244;
 const TROY_OUNCE_GRAMS = 31.1034768;
 const GOLD_PURITY = 0.965;
@@ -116,15 +120,7 @@ function setupEvents() {
     await saveHoldingFromForm();
   });
 
-  el.enableNotifications.addEventListener("click", async () => {
-    if (!("Notification" in window)) {
-      showToast("เบราว์เซอร์นี้ยังไม่รองรับ Notification");
-      return;
-    }
-    const result = await Notification.requestPermission();
-    updateNotificationStatus();
-    showToast(result === "granted" ? "เปิดแจ้งเตือนแล้ว" : "ยังไม่ได้อนุญาต Notification");
-  });
+  el.enableNotifications.addEventListener("click", requestNotificationAccess);
 
   el.exportData.addEventListener("click", exportBackup);
   el.importData.addEventListener("change", importBackup);
@@ -184,6 +180,7 @@ async function syncDataFromSheets(showResult) {
 
     persist();
     render();
+    syncNativeNotificationSchedule();
 
     if (showResult) {
       if (fallbackWriteResult?.configured) {
@@ -572,6 +569,7 @@ async function saveHoldingFromForm() {
   persist();
   closeHoldingForm();
   render();
+  syncNativeNotificationSchedule();
 
   try {
     const writeResult = await writeHoldingToSheet(item);
@@ -594,6 +592,7 @@ async function deleteHolding(id) {
     state.holdings = state.holdings.filter((holding) => holding.id !== id);
     persist();
     render();
+    syncNativeNotificationSchedule();
     showToast(
       writeResult.configured && writeResult.result?.deleted === false
         ? "ลบรายการจากแอพแล้ว แต่ใน Sheet ไม่พบแถวนี้"
@@ -1174,14 +1173,65 @@ function checkDueNotifications() {
 
 function notify(title, body) {
   showToast(body);
-  if ("Notification" in window && Notification.permission === "granted") {
-    new Notification(title, { body, tag: `${title}-${body}` });
+  notifySystem(title, body);
+}
+
+async function requestNotificationAccess() {
+  const nativeNotifications = getNativeNotifications();
+
+  try {
+    if (nativeNotifications) {
+      await ensureNativeNotificationChannel(nativeNotifications);
+      const current = await nativeNotifications.checkPermissions();
+      const permission = current.display === "granted" ? current : await nativeNotifications.requestPermissions();
+      await updateNotificationStatus();
+
+      if (permission.display === "granted") {
+        await scheduleNativeNotifications();
+        await notifySystem("AzA Gold", "เปิดแจ้งเตือนแล้ว");
+        showToast("เปิดแจ้งเตือนบน Android แล้ว");
+      } else {
+        showToast("ยังไม่ได้อนุญาต Notification");
+      }
+      return;
+    }
+
+    if (!supportsWebNotifications()) {
+      showToast(webNotificationUnsupportedMessage());
+      updateNotificationStatus();
+      return;
+    }
+
+    const result = await Notification.requestPermission();
+    updateNotificationStatus();
+    if (result === "granted") {
+      await notifySystem("AzA Gold", "เปิดแจ้งเตือนแล้ว");
+      showToast("เปิดแจ้งเตือนแล้ว");
+    } else {
+      showToast("ยังไม่ได้อนุญาต Notification");
+    }
+  } catch (error) {
+    console.error(error);
+    showToast("เปิดแจ้งเตือนไม่สำเร็จ กรุณาตรวจสิทธิ์ในระบบ");
+    updateNotificationStatus();
   }
 }
 
-function updateNotificationStatus() {
-  if (!("Notification" in window)) {
-    el.notificationStatus.textContent = "เบราว์เซอร์นี้ไม่รองรับ Notification";
+async function updateNotificationStatus() {
+  const nativeNotifications = getNativeNotifications();
+  if (nativeNotifications) {
+    try {
+      const permission = await nativeNotifications.checkPermissions();
+      el.notificationStatus.textContent =
+        permission.display === "granted" ? "Native Notification เปิดอยู่" : "Native Notification ยังไม่ได้เปิด";
+    } catch {
+      el.notificationStatus.textContent = "Native Notification ยังไม่ได้เปิด";
+    }
+    return;
+  }
+
+  if (!supportsWebNotifications()) {
+    el.notificationStatus.textContent = webNotificationUnsupportedMessage();
   } else if (Notification.permission === "granted") {
     el.notificationStatus.textContent = "Notification เปิดอยู่";
   } else if (Notification.permission === "denied") {
@@ -1189,6 +1239,140 @@ function updateNotificationStatus() {
   } else {
     el.notificationStatus.textContent = "Notification ยังไม่ได้เปิด";
   }
+}
+
+function supportsWebNotifications() {
+  return "Notification" in window && window.isSecureContext;
+}
+
+function webNotificationUnsupportedMessage() {
+  if (isIosDevice() && !isStandaloneApp()) {
+    return "iOS/Safari ต้องเพิ่มเว็บไปหน้า Home Screen ก่อน";
+  }
+  return "เบราว์เซอร์นี้ยังไม่รองรับ Notification";
+}
+
+function isIosDevice() {
+  return /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+}
+
+function isStandaloneApp() {
+  return window.matchMedia?.("(display-mode: standalone)")?.matches || window.navigator.standalone === true;
+}
+
+function getNativeNotifications() {
+  return window.Capacitor?.Plugins?.LocalNotifications || null;
+}
+
+async function ensureNativeNotificationChannel(nativeNotifications) {
+  if (!nativeNotifications.createChannel) return;
+  await nativeNotifications.createChannel({
+    id: NATIVE_NOTIFICATION_CHANNEL_ID,
+    name: "AzA Gold",
+    description: "ราคาทองและแจ้งเตือนขายทอง",
+    importance: 5,
+    visibility: 1,
+    sound: "default",
+  });
+}
+
+async function notifySystem(title, body) {
+  const nativeNotifications = getNativeNotifications();
+  if (nativeNotifications) {
+    try {
+      const permission = await nativeNotifications.checkPermissions();
+      if (permission.display !== "granted") return;
+      await nativeNotifications.schedule({
+        notifications: [
+          {
+            id: notificationId(`now:${Date.now()}:${title}:${body}`),
+            title,
+            body,
+            channelId: NATIVE_NOTIFICATION_CHANNEL_ID,
+            autoCancel: true,
+          },
+        ],
+      });
+    } catch (error) {
+      console.error(error);
+    }
+    return;
+  }
+
+  if (!supportsWebNotifications() || Notification.permission !== "granted") return;
+
+  try {
+    const registration = await navigator.serviceWorker?.ready;
+    if (registration?.showNotification) {
+      await registration.showNotification(title, { body, tag: `${title}-${body}` });
+    } else {
+      new Notification(title, { body, tag: `${title}-${body}` });
+    }
+  } catch {
+    new Notification(title, { body, tag: `${title}-${body}` });
+  }
+}
+
+async function scheduleNativeNotifications() {
+  const nativeNotifications = getNativeNotifications();
+  if (!nativeNotifications) return;
+
+  const permission = await nativeNotifications.checkPermissions();
+  if (permission.display !== "granted") return;
+
+  const pending = await nativeNotifications.getPending();
+  const scheduledIds = pending.notifications
+    .map((notification) => notification.id)
+    .filter((id) => id >= NATIVE_NOTIFICATION_ID_MIN && id <= NATIVE_NOTIFICATION_ID_MAX);
+  if (scheduledIds.length) {
+    await nativeNotifications.cancel({ notifications: scheduledIds.map((id) => ({ id })) });
+  }
+
+  const totals = calculatePortfolio();
+  const notifications = [
+    {
+      id: DAILY_NOTIFICATION_ID,
+      title: "AzA Gold",
+      body: `ราคาทองรายวัน 09.00 น. · ส่วนต่างล่าสุด ${signedMoney(totals.unrealized)}`,
+      channelId: NATIVE_NOTIFICATION_CHANNEL_ID,
+      autoCancel: true,
+      schedule: { on: { hour: 9, minute: 0 }, repeats: true, allowWhileIdle: true },
+    },
+  ];
+
+  state.holdings
+    .filter((holding) => holding.notifySell && holding.notifyDate && holding.notifyDate >= todayKey())
+    .forEach((holding, index) => {
+      ["09:05", "12:00"].forEach((time) => {
+        notifications.push({
+          id: notificationId(`sell:${holding.id}:${holding.notifyDate}:${time}`),
+          title: "AzA Gold",
+          body: `ขายทองรายการที่ ${index + 1}: ${holding.name}`,
+          channelId: NATIVE_NOTIFICATION_CHANNEL_ID,
+          autoCancel: true,
+          schedule: { at: dateTimeFromParts(holding.notifyDate, time), allowWhileIdle: true },
+        });
+      });
+    });
+
+  await nativeNotifications.schedule({ notifications });
+}
+
+function syncNativeNotificationSchedule() {
+  if (!getNativeNotifications()) return;
+  scheduleNativeNotifications().catch((error) => console.error(error));
+}
+
+function notificationId(value) {
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (hash * 31 + value.charCodeAt(index)) >>> 0;
+  }
+  return NATIVE_NOTIFICATION_ID_MIN + (hash % (NATIVE_NOTIFICATION_ID_MAX - NATIVE_NOTIFICATION_ID_MIN));
+}
+
+function dateTimeFromParts(date, time) {
+  return new Date(`${date}T${time}:00`);
 }
 
 function exportBackup() {
@@ -1215,6 +1399,7 @@ function importBackup(event) {
       };
       persist();
       render();
+      syncNativeNotificationSchedule();
       showToast("นำเข้าข้อมูลแล้ว");
     } catch (error) {
       console.error(error);
