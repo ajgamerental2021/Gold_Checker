@@ -1,0 +1,19 @@
+{
+  "name": "aza-gold",
+  "version": "1.0.0",
+  "private": true,
+  "description": "AzA Gold web and Android app",
+  "scripts": {
+    "check": "node --check app.js",
+    "build:web": "node scripts/sync-web-assets.js",
+    "android:sync": "npm run build:web && npx cap sync android",
+    "android:apk": "npm run android:sync && cd android && ./gradlew assembleDebug"
+  },
+  "dependencies": {
+    "@capacitor/android": "^7.4.4",
+    "@capacitor/core": "^7.4.4"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^7.4.4"
+  }
+}
