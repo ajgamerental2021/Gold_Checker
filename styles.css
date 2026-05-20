@@ -537,8 +537,8 @@ canvas {
 
 @media (max-width: 1120px) {
   .app-shell {
-    grid-template-columns: 1fr;
-    align-items: start;
+    display: block;
+    min-height: 0;
   }
 
   .sidebar {
@@ -622,6 +622,10 @@ canvas {
   .section-heading {
     align-items: start;
     flex-direction: column;
+  }
+
+  .topbar {
+    margin-bottom: 18px;
   }
 
   .metrics-grid,
@@ -744,6 +748,28 @@ canvas {
 
   .responsive-table td:last-child {
     border-bottom: 0;
+  }
+
+  #forecast .responsive-table tbody {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  #forecast .responsive-table tr {
+    margin-bottom: 0;
+    padding: 8px;
+  }
+
+  #forecast .responsive-table td {
+    grid-template-columns: 1fr;
+    gap: 3px;
+    text-align: left;
+    padding: 7px 0;
+  }
+
+  #forecast .responsive-table td::before {
+    font-size: 11px;
   }
 }
 

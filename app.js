@@ -371,6 +371,7 @@ function setTab(tabName) {
     forecast: "คาดการณ์",
   }[tabName];
   renderCharts();
+  window.scrollTo({ top: 0, behavior: "auto" });
 }
 
 function openHoldingForm(holding) {
