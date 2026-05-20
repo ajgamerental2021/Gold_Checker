@@ -3,6 +3,8 @@ const NOTIFICATION_LOG_KEY = "aza-gold-notification-log-v1";
 const GOOGLE_SHEET_ID = "1i-619OKgmIHnBWapurp-_VfAx0dqh_cgcJBo-FHdeXw";
 const HOLDINGS_GID = "0";
 const DAILY_PRICES_GID = "484644725";
+const SHEET_WRITE_WEB_APP_URL = "";
+const SHEET_WRITE_WEB_APP_URL_KEY = "aza-gold-sheet-write-web-app-url";
 const THAI_GOLD_BAHT_GRAMS = 15.244;
 const TROY_OUNCE_GRAMS = 31.1034768;
 const GOLD_PURITY = 0.965;
@@ -65,6 +67,7 @@ const el = {
 init();
 
 function init() {
+  captureSheetWriteUrl();
   el.todayLabel.textContent = formatFullDate(new Date());
   setupEvents();
   updateNotificationStatus();
@@ -111,14 +114,15 @@ function setupEvents() {
   });
 }
 
-async function refreshLivePrice(showResult) {
+async function refreshLivePrice(showResult, writeToSheet = false) {
   try {
     setLoadingPrice(true);
     const live = await fetchLiveThaiGoldPrice();
     upsertDailyPrice(live);
+    const writeResult = writeToSheet ? await writeDailyPriceToSheet(live) : { configured: false };
     persist();
     render();
-    if (showResult) showToast("อัพเดทราคาทองวันนี้แล้ว");
+    if (showResult) showToast(writeResult.configured ? "อัพเดทราคาทองวันนี้และส่งเข้า Sheet แล้ว" : "อัพเดทราคาทองวันนี้แล้ว");
   } catch (error) {
     console.error(error);
     if (showResult) showToast("ดึงราคาไม่ได้ กรุณาตรวจ Google Sheet หรืออินเทอร์เน็ต");
@@ -132,6 +136,7 @@ async function syncDataFromSheets(showResult) {
     setLoadingPrice(true);
     const [holdingResult, priceResult] = await Promise.allSettled([fetchSheetHoldings(), fetchSheetPrices()]);
     let synced = false;
+    let fallbackWriteResult = null;
 
     if (holdingResult.status === "fulfilled" && holdingResult.value.length) {
       state.holdings = holdingResult.value;
@@ -144,18 +149,26 @@ async function syncDataFromSheets(showResult) {
     }
 
     if (!latestPriceForDate(todayKey())) {
-      await refreshLivePrice(false);
-    } else {
-      persist();
-      render();
+      const live = await fetchLiveThaiGoldPrice();
+      upsertDailyPrice(live);
+      fallbackWriteResult = await writeDailyPriceToSheet(live);
     }
 
+    persist();
+    render();
+
     if (showResult) {
-      showToast(synced ? "ซิงค์ข้อมูลจาก Google Sheet แล้ว" : "Google Sheet ยังไม่มีแถวข้อมูล ใช้ราคาสดวันนี้แทน");
+      if (fallbackWriteResult?.configured) {
+        showToast("ไม่มีราคาวันนี้ใน Sheet เลยส่งราคาสดเข้า Sheet แล้ว");
+      } else if (fallbackWriteResult && !fallbackWriteResult.configured) {
+        showToast("ไม่มีราคาวันนี้ใน Sheet ใช้ราคาสดในเครื่องก่อน");
+      } else {
+        showToast(synced ? "ซิงค์ข้อมูลจาก Google Sheet แล้ว" : "Google Sheet ยังไม่มีแถวข้อมูล ใช้ราคาสดวันนี้แทน");
+      }
     }
   } catch (error) {
     console.error(error);
-    if (!latestPriceForDate(todayKey())) await refreshLivePrice(false);
+    if (!latestPriceForDate(todayKey())) await refreshLivePrice(false, true);
     if (showResult) showToast("ซิงค์ Google Sheet ไม่สำเร็จ ใช้ข้อมูลล่าสุดในเครื่องแทน");
   } finally {
     setLoadingPrice(false);
@@ -212,6 +225,33 @@ async function fetchSheetRows(gid) {
   const url = `https://docs.google.com/spreadsheets/d/${GOOGLE_SHEET_ID}/export?format=csv&gid=${gid}&cachebust=${Date.now()}`;
   const csv = await fetchText(url);
   return csvToObjects(csv);
+}
+
+async function writeDailyPriceToSheet(price) {
+  const url = getSheetWriteUrl();
+  if (!url) return { configured: false, sent: false };
+
+  const payload = {
+    action: "upsertDailyPrice",
+    sheetId: GOOGLE_SHEET_ID,
+    gid: DAILY_PRICES_GID,
+    record: {
+      date: price.date,
+      time: price.time,
+      buy: price.buy,
+      sell: price.sell,
+      source: price.source,
+    },
+  };
+
+  await fetch(url, {
+    method: "POST",
+    mode: "no-cors",
+    headers: { "Content-Type": "text/plain;charset=utf-8" },
+    body: JSON.stringify(payload),
+  });
+
+  return { configured: true, sent: true };
 }
 
 async function fetchLiveThaiGoldPrice() {
@@ -779,6 +819,19 @@ function importBackup(event) {
   };
   reader.readAsText(file);
   event.target.value = "";
+}
+
+function captureSheetWriteUrl() {
+  const params = new URLSearchParams(window.location.search);
+  const url = params.get("sheetWriteUrl");
+  if (url) {
+    localStorage.setItem(SHEET_WRITE_WEB_APP_URL_KEY, url.trim());
+    history.replaceState({}, "", window.location.pathname);
+  }
+}
+
+function getSheetWriteUrl() {
+  return (localStorage.getItem(SHEET_WRITE_WEB_APP_URL_KEY) || SHEET_WRITE_WEB_APP_URL).trim();
 }
 
 function csvToObjects(csv) {
