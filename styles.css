@@ -276,6 +276,14 @@ button {
   white-space: nowrap;
 }
 
+.link-badge {
+  text-decoration: none;
+}
+
+.tight-heading {
+  margin-bottom: 8px;
+}
+
 .primary-button,
 .secondary-button,
 .danger-button {

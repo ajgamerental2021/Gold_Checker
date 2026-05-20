@@ -186,6 +186,11 @@
 
           <div class="work-grid">
             <section class="surface">
+              <div class="section-heading tight-heading">
+                <div>
+                  <h3>คาดการณ์จากข้อมูลในแอพ</h3>
+                </div>
+              </div>
               <canvas id="forecastChart" height="300" aria-label="กราฟคาดการณ์ราคาทอง"></canvas>
             </section>
             <section class="surface compact">
@@ -193,6 +198,17 @@
               <div id="adviceBox" class="advice-box"></div>
             </section>
           </div>
+
+          <section class="surface">
+            <div class="section-heading">
+              <div>
+                <h3>แนวโน้มราคาทองจากภายนอก</h3>
+                <p id="externalTrendSummary">ดึงข้อมูลจาก CoinGecko PAX Gold และแปลงเป็นราคาต่อทอง 1 บาท</p>
+              </div>
+              <a id="externalTrendSource" class="badge link-badge" href="https://www.coingecko.com/en/coins/pax-gold" target="_blank" rel="noreferrer">CoinGecko PAXG</a>
+            </div>
+            <canvas id="externalTrendChart" height="280" aria-label="กราฟแนวโน้มราคาทองจากภายนอก"></canvas>
+          </section>
 
           <div class="surface">
             <table class="responsive-table">

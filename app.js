@@ -22,6 +22,7 @@ const FORECAST_HORIZONS = [
 let state = loadState();
 let activeTab = "dashboard";
 let toastTimer;
+let externalTrend = { points: [], status: "idle", thbRate: null, source: "CoinGecko PAX Gold", updatedAt: "" };
 
 const el = {
   tabs: document.querySelectorAll(".tab"),
@@ -44,6 +45,9 @@ const el = {
   dueList: document.querySelector("#dueList"),
   priceChart: document.querySelector("#priceChart"),
   forecastChart: document.querySelector("#forecastChart"),
+  externalTrendChart: document.querySelector("#externalTrendChart"),
+  externalTrendSummary: document.querySelector("#externalTrendSummary"),
+  externalTrendSource: document.querySelector("#externalTrendSource"),
   priceRows: document.querySelector("#priceRows"),
   newHolding: document.querySelector("#newHolding"),
   holdingForm: document.querySelector("#holdingForm"),
@@ -73,6 +77,7 @@ function init() {
   updateNotificationStatus();
   render();
   syncDataFromSheets(false);
+  loadExternalGoldTrend(false);
   registerServiceWorker();
   scheduleNotificationChecks();
 }
@@ -82,7 +87,10 @@ function setupEvents() {
     tab.addEventListener("click", () => setTab(tab.dataset.tab));
   });
 
-  el.refreshPrice.addEventListener("click", () => syncDataFromSheets(true));
+  el.refreshPrice.addEventListener("click", async () => {
+    await syncDataFromSheets(true);
+    await loadExternalGoldTrend(false);
+  });
 
   el.newHolding.addEventListener("click", () => openHoldingForm());
   el.cancelHolding.addEventListener("click", () => closeHoldingForm());
@@ -226,6 +234,60 @@ async function fetchSheetRows(gid) {
   const url = `https://docs.google.com/spreadsheets/d/${GOOGLE_SHEET_ID}/export?format=csv&gid=${gid}&cachebust=${Date.now()}`;
   const csv = await fetchText(url);
   return csvToObjects(csv);
+}
+
+async function loadExternalGoldTrend(showResult) {
+  try {
+    externalTrend = { ...externalTrend, status: "loading" };
+    renderExternalTrendSummary();
+    drawExternalTrendChart();
+
+    const trend = await fetchCoinGeckoPaxGoldTrend();
+    externalTrend = { ...trend, status: "ready" };
+    renderExternalTrendSummary();
+    drawExternalTrendChart();
+    if (showResult) showToast("อัพเดทแนวโน้มราคาทองจาก CoinGecko แล้ว");
+  } catch (error) {
+    console.error(error);
+    externalTrend = { ...externalTrend, status: "error" };
+    renderExternalTrendSummary();
+    drawExternalTrendChart();
+    if (showResult) showToast("ดึงแนวโน้มภายนอกไม่สำเร็จ");
+  }
+}
+
+async function fetchCoinGeckoPaxGoldTrend() {
+  const [data, fx] = await Promise.all([
+    fetchJson("https://api.coingecko.com/api/v3/coins/pax-gold/market_chart?vs_currency=usd&days=90&interval=daily"),
+    fetchUsdThbRate(),
+  ]);
+  const thbRate = Number(fx.rate);
+  const prices = Array.isArray(data.prices) ? data.prices : [];
+  const points = prices
+    .map(([timestamp, usd]) => {
+      const date = new Date(timestamp);
+      return {
+        date: todayKey(date),
+        label: formatShortDate(todayKey(date)),
+        value: convertTroyOunceUsdToThaiGoldBaht(Number(usd), thbRate),
+        usd: Number(usd),
+      };
+    })
+    .filter((point) => point.date && Number.isFinite(point.value) && point.value > 0);
+
+  if (!points.length) throw new Error("CoinGecko trend payload missing");
+
+  return {
+    points,
+    thbRate,
+    source: "CoinGecko PAX Gold",
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+function convertTroyOunceUsdToThaiGoldBaht(usdPerTroyOunce, thbRate) {
+  const estimated = usdPerTroyOunce * thbRate * (THAI_GOLD_BAHT_GRAMS / TROY_OUNCE_GRAMS) * GOLD_PURITY;
+  return roundToNearest(estimated, 50);
 }
 
 async function writeDailyPriceToSheet(price) {
@@ -573,6 +635,7 @@ function renderHoldings() {
 function renderForecast() {
   const price = latestPrice();
   const portfolio = calculatePortfolio();
+  renderExternalTrendSummary();
 
   if (!price) {
     el.forecastRows.innerHTML = `<tr><td colspan="4">ยังไม่มีราคาทองสำหรับคาดการณ์</td></tr>`;
@@ -617,6 +680,7 @@ function renderForecast() {
 function renderCharts() {
   drawPriceChart();
   drawForecastChart();
+  drawExternalTrendChart();
 }
 
 function drawPriceChart() {
@@ -646,6 +710,45 @@ function drawForecastChart() {
     color: "#2563eb",
     fill: "rgba(37, 99, 235, 0.1)",
     emptyText: "ยังไม่มีข้อมูลคาดการณ์",
+  });
+}
+
+function renderExternalTrendSummary() {
+  if (!el.externalTrendSummary) return;
+
+  if (externalTrend.status === "loading") {
+    el.externalTrendSummary.textContent = "กำลังดึงข้อมูลจาก CoinGecko PAX Gold...";
+    return;
+  }
+
+  if (externalTrend.status === "error") {
+    el.externalTrendSummary.textContent = "ดึงแนวโน้มภายนอกไม่สำเร็จ จะแสดงใหม่เมื่ออัพเดทครั้งถัดไป";
+    return;
+  }
+
+  if (!externalTrend.points.length) {
+    el.externalTrendSummary.textContent = "ดึงข้อมูลจาก CoinGecko PAX Gold และแปลงเป็นราคาต่อทอง 1 บาท";
+    return;
+  }
+
+  const first = externalTrend.points[0];
+  const last = externalTrend.points[externalTrend.points.length - 1];
+  const diff = last.value - first.value;
+  el.externalTrendSummary.textContent = `90 วันล่าสุด: ${money(first.value)} → ${money(last.value)} (${signedMoney(diff)}) · ใช้ USD/THB ${formatNumber(externalTrend.thbRate)}`;
+}
+
+function drawExternalTrendChart() {
+  if (!el.externalTrendChart) return;
+
+  const points = externalTrend.points.map((point, index) => ({
+    label: index === 0 || index === externalTrend.points.length - 1 ? formatShortDate(point.date) : "",
+    value: point.value,
+  }));
+
+  drawLineChart(el.externalTrendChart, points, {
+    color: "#15803d",
+    fill: "rgba(21, 128, 61, 0.1)",
+    emptyText: externalTrend.status === "loading" ? "กำลังดึงข้อมูลแนวโน้ม" : "ยังไม่มีข้อมูลแนวโน้มภายนอก",
   });
 }
 

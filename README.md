@@ -65,6 +65,7 @@ https://script.google.com/macros/s/AKfycbz62Dw-RJkEBuQ_7lzJEdqJQBGulf1Ro7iQ6WlLm
 - ตั้งแจ้งเตือนขายรายรายการ เวลา 09.05 และ 12.00 น. ในวันที่กำหนด
 - แจ้งเตือนสรุปราคาทองและส่วนต่างทุกวันเวลา 09.00 น.
 - Forecast ระยะ 15 วัน, 1 เดือน, 3 เดือน, 6 เดือน, 1 ปี, 3 ปี, 5 ปี, 10 ปี พร้อมกราฟและตาราง
+- กราฟแนวโน้มภายนอก 90 วันจาก CoinGecko PAX Gold แปลงเป็นราคาต่อทอง 1 บาทด้วย USD/THB
 - Export/Import backup เป็น JSON
 
 ## Notes
