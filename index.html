@@ -108,29 +108,12 @@
           <div class="section-heading">
             <div>
               <h3 id="prices-title">ราคาทองรายวัน</h3>
-              <p>เริ่มบันทึกด้วยราคาของวันนี้ และเก็บประวัติต่อจากนี้</p>
+              <p>ซิงค์จาก Google Sheet และอัพเดทราคาวันนี้อัตโนมัติเมื่อเปิดแอพ</p>
             </div>
-            <button id="openPriceForm" class="primary-button" type="button">เพิ่มราคาเอง</button>
           </div>
 
-          <form id="priceForm" class="inline-form hidden">
-            <label>
-              วันที่
-              <input id="priceDate" type="date" required />
-            </label>
-            <label>
-              ราคารับซื้อ
-              <input id="priceBuy" type="number" min="0" step="1" required />
-            </label>
-            <label>
-              ราคาขาย
-              <input id="priceSell" type="number" min="0" step="1" required />
-            </label>
-            <button class="primary-button" type="submit">บันทึก</button>
-          </form>
-
           <div class="surface">
-            <table>
+            <table class="responsive-table">
               <thead>
                 <tr>
                   <th>วันที่</th>
@@ -138,7 +121,6 @@
                   <th>รับซื้อ</th>
                   <th>ขาย</th>
                   <th>แหล่งข้อมูล</th>
-                  <th></th>
                 </tr>
               </thead>
               <tbody id="priceRows"></tbody>
@@ -150,7 +132,7 @@
           <div class="section-heading">
             <div>
               <h3 id="holdings-title">ทองที่สะสม</h3>
-              <p>เพิ่ม แก้ไข ลบ และตั้งวันที่แจ้งเตือนขายได้</p>
+              <p>เพิ่ม แก้ไข ตั้งวันที่แจ้งเตือนขาย และซิงค์ข้อมูลจาก Google Sheet ได้</p>
             </div>
             <button id="newHolding" class="primary-button" type="button">เพิ่มรายการ</button>
           </div>
@@ -213,7 +195,7 @@
           </div>
 
           <div class="surface">
-            <table>
+            <table class="responsive-table">
               <thead>
                 <tr>
                   <th>ระยะเวลา</th>

@@ -27,6 +27,21 @@ export ANDROID_HOME=/opt/homebrew/share/android-commandlinetools
 npm run android:apk
 ```
 
+## Google Sheet Sync
+
+แอพอ่านข้อมูลจาก Google Sheet นี้:
+
+```text
+https://docs.google.com/spreadsheets/d/1i-619OKgmIHnBWapurp-_VfAx0dqh_cgcJBo-FHdeXw/edit?usp=sharing
+```
+
+- `gid=0` สำหรับทองที่สะสม
+  - Header: `ลำดับ,รายการ,จำนวนบาท,ราคาซื้อรวม,ราคาขายรวม,วันที่ซื้อ,แจ้งเตือนขาย,วันที่แจ้งเตือน`
+- `gid=484644725` สำหรับราคาทองรายวัน
+  - Header: `วันที่,เวลา,รับซื้อ,ขาย,แหล่งข้อมูล`
+
+ถ้า Google Sheet ยังไม่มีแถวราคาของวันนี้ แอพจะดึงราคาสดโดยประมาณและบันทึกไว้ในเครื่องเป็น fallback เมื่อเปิดแอพ
+
 ## Features
 
 - Dashboard ราคาทองวันนี้, น้ำหนักทองสะสม, และส่วนต่างจากราคาปัจจุบัน

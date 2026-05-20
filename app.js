@@ -1,5 +1,8 @@
 const STORAGE_KEY = "aza-gold-state-v1";
 const NOTIFICATION_LOG_KEY = "aza-gold-notification-log-v1";
+const GOOGLE_SHEET_ID = "1i-619OKgmIHnBWapurp-_VfAx0dqh_cgcJBo-FHdeXw";
+const HOLDINGS_GID = "0";
+const DAILY_PRICES_GID = "484644725";
 const THAI_GOLD_BAHT_GRAMS = 15.244;
 const TROY_OUNCE_GRAMS = 31.1034768;
 const GOLD_PURITY = 0.965;
@@ -39,11 +42,6 @@ const el = {
   dueList: document.querySelector("#dueList"),
   priceChart: document.querySelector("#priceChart"),
   forecastChart: document.querySelector("#forecastChart"),
-  openPriceForm: document.querySelector("#openPriceForm"),
-  priceForm: document.querySelector("#priceForm"),
-  priceDate: document.querySelector("#priceDate"),
-  priceBuy: document.querySelector("#priceBuy"),
-  priceSell: document.querySelector("#priceSell"),
   priceRows: document.querySelector("#priceRows"),
   newHolding: document.querySelector("#newHolding"),
   holdingForm: document.querySelector("#holdingForm"),
@@ -71,7 +69,7 @@ function init() {
   setupEvents();
   updateNotificationStatus();
   render();
-  seedTodayPrice();
+  syncDataFromSheets(false);
   registerServiceWorker();
   scheduleNotificationChecks();
 }
@@ -81,35 +79,7 @@ function setupEvents() {
     tab.addEventListener("click", () => setTab(tab.dataset.tab));
   });
 
-  el.refreshPrice.addEventListener("click", () => refreshLivePrice(true));
-  el.openPriceForm.addEventListener("click", () => {
-    el.priceForm.classList.toggle("hidden");
-    el.priceDate.value = todayKey();
-    const current = latestPrice();
-    if (current) {
-      el.priceBuy.value = Math.round(current.buy);
-      el.priceSell.value = Math.round(current.sell);
-    }
-  });
-
-  el.priceForm.addEventListener("submit", (event) => {
-    event.preventDefault();
-    const record = {
-      id: crypto.randomUUID(),
-      date: el.priceDate.value,
-      time: nowTime(),
-      buy: Number(el.priceBuy.value),
-      sell: Number(el.priceSell.value),
-      source: "manual",
-      createdAt: new Date().toISOString(),
-    };
-    upsertDailyPrice(record);
-    el.priceForm.reset();
-    el.priceForm.classList.add("hidden");
-    persist();
-    render();
-    showToast("บันทึกราคาทองแล้ว");
-  });
+  el.refreshPrice.addEventListener("click", () => syncDataFromSheets(true));
 
   el.newHolding.addEventListener("click", () => openHoldingForm());
   el.cancelHolding.addEventListener("click", () => closeHoldingForm());
@@ -141,12 +111,6 @@ function setupEvents() {
   });
 }
 
-async function seedTodayPrice() {
-  if (!latestPriceForDate(todayKey())) {
-    await refreshLivePrice(false);
-  }
-}
-
 async function refreshLivePrice(showResult) {
   try {
     setLoadingPrice(true);
@@ -157,10 +121,97 @@ async function refreshLivePrice(showResult) {
     if (showResult) showToast("อัพเดทราคาทองวันนี้แล้ว");
   } catch (error) {
     console.error(error);
-    if (showResult) showToast("ดึงราคาไม่ได้ ลองเพิ่มราคาเองได้");
+    if (showResult) showToast("ดึงราคาไม่ได้ กรุณาตรวจ Google Sheet หรืออินเทอร์เน็ต");
   } finally {
     setLoadingPrice(false);
   }
+}
+
+async function syncDataFromSheets(showResult) {
+  try {
+    setLoadingPrice(true);
+    const [holdingResult, priceResult] = await Promise.allSettled([fetchSheetHoldings(), fetchSheetPrices()]);
+    let synced = false;
+
+    if (holdingResult.status === "fulfilled" && holdingResult.value.length) {
+      state.holdings = holdingResult.value;
+      synced = true;
+    }
+
+    if (priceResult.status === "fulfilled" && priceResult.value.length) {
+      state.prices = priceResult.value;
+      synced = true;
+    }
+
+    if (!latestPriceForDate(todayKey())) {
+      await refreshLivePrice(false);
+    } else {
+      persist();
+      render();
+    }
+
+    if (showResult) {
+      showToast(synced ? "ซิงค์ข้อมูลจาก Google Sheet แล้ว" : "Google Sheet ยังไม่มีแถวข้อมูล ใช้ราคาสดวันนี้แทน");
+    }
+  } catch (error) {
+    console.error(error);
+    if (!latestPriceForDate(todayKey())) await refreshLivePrice(false);
+    if (showResult) showToast("ซิงค์ Google Sheet ไม่สำเร็จ ใช้ข้อมูลล่าสุดในเครื่องแทน");
+  } finally {
+    setLoadingPrice(false);
+  }
+}
+
+async function fetchSheetHoldings() {
+  const rows = await fetchSheetRows(HOLDINGS_GID);
+  return rows
+    .map((row, index) => {
+      const name = cell(row, "รายการ");
+      const weightBaht = parseNumber(cell(row, "จำนวนบาท"));
+      const buyPrice = parseNumber(cell(row, "ราคาซื้อรวม"));
+      if (!name || !weightBaht || !buyPrice) return null;
+      return {
+        id: `sheet-holding-${index + 1}`,
+        name,
+        weightBaht,
+        buyPrice,
+        sellPrice: parseOptionalNumber(cell(row, "ราคาขายรวม")),
+        purchaseDate: parseDateValue(cell(row, "วันที่ซื้อ")) || todayKey(),
+        notifySell: parseBoolean(cell(row, "แจ้งเตือนขาย")),
+        notifyDate: parseDateValue(cell(row, "วันที่แจ้งเตือน")) || "",
+        createdAt: new Date().toISOString(),
+        source: "Google Sheet",
+      };
+    })
+    .filter(Boolean);
+}
+
+async function fetchSheetPrices() {
+  const rows = await fetchSheetRows(DAILY_PRICES_GID);
+  return rows
+    .map((row, index) => {
+      const date = parseDateValue(cell(row, "วันที่"));
+      const buy = parseNumber(cell(row, "รับซื้อ"));
+      const sell = parseNumber(cell(row, "ขาย"));
+      if (!date || !buy || !sell) return null;
+      return {
+        id: `sheet-price-${index + 1}`,
+        date,
+        time: normalizeTime(cell(row, "เวลา")) || nowTime(),
+        buy,
+        sell,
+        source: cell(row, "แหล่งข้อมูล") || "Google Sheet",
+        createdAt: new Date().toISOString(),
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`));
+}
+
+async function fetchSheetRows(gid) {
+  const url = `https://docs.google.com/spreadsheets/d/${GOOGLE_SHEET_ID}/export?format=csv&gid=${gid}&cachebust=${Date.now()}`;
+  const csv = await fetchText(url);
+  return csvToObjects(csv);
 }
 
 async function fetchLiveThaiGoldPrice() {
@@ -253,6 +304,12 @@ async function fetchJson(url) {
   return response.json();
 }
 
+async function fetchText(url) {
+  const response = await fetch(url, { cache: "no-store" });
+  if (!response.ok) throw new Error(`${url} returned ${response.status}`);
+  return response.text();
+}
+
 function upsertDailyPrice(record) {
   const existingIndex = state.prices.findIndex((item) => item.date === record.date);
   if (existingIndex >= 0) {
@@ -326,17 +383,6 @@ function saveHoldingFromForm() {
   showToast("บันทึกรายการทองแล้ว");
 }
 
-function deleteHolding(id) {
-  const item = state.holdings.find((holding) => holding.id === id);
-  if (!item) return;
-  const ok = confirm(`ลบรายการ "${item.name}" หรือไม่`);
-  if (!ok) return;
-  state.holdings = state.holdings.filter((holding) => holding.id !== id);
-  persist();
-  render();
-  showToast("ลบรายการแล้ว");
-}
-
 function render() {
   renderDashboard();
   renderPrices();
@@ -381,7 +427,7 @@ function renderDashboard() {
 
 function renderPrices() {
   if (!state.prices.length) {
-    el.priceRows.innerHTML = `<tr><td colspan="6">ยังไม่มีประวัติราคา</td></tr>`;
+    el.priceRows.innerHTML = `<tr><td colspan="5">ยังไม่มีประวัติราคา</td></tr>`;
     return;
   }
 
@@ -389,24 +435,15 @@ function renderPrices() {
     .map(
       (price) => `
         <tr>
-          <td>${formatShortDate(price.date)}</td>
-          <td>${price.time || "-"}</td>
-          <td>${money(price.buy)}</td>
-          <td>${money(price.sell)}</td>
-          <td>${price.source || "-"}</td>
-          <td><button class="mini-button" type="button" data-delete-price="${price.id}" title="ลบราคา">×</button></td>
+          <td data-label="วันที่">${formatShortDate(price.date)}</td>
+          <td data-label="เวลา">${price.time || "-"}</td>
+          <td data-label="รับซื้อ">${money(price.buy)}</td>
+          <td data-label="ขาย">${money(price.sell)}</td>
+          <td data-label="แหล่งข้อมูล">${price.source || "-"}</td>
         </tr>
       `,
     )
     .join("");
-
-  el.priceRows.querySelectorAll("[data-delete-price]").forEach((button) => {
-    button.addEventListener("click", () => {
-      state.prices = state.prices.filter((price) => price.id !== button.dataset.deletePrice);
-      persist();
-      render();
-    });
-  });
 }
 
 function renderHoldings() {
@@ -436,7 +473,6 @@ function renderHoldings() {
             </div>
             <div class="card-actions">
               <button class="mini-button" type="button" data-edit-holding="${item.id}" title="แก้ไข">✎</button>
-              <button class="mini-button" type="button" data-delete-holding="${item.id}" title="ลบ">×</button>
             </div>
           </header>
           <div class="holding-stats">
@@ -453,9 +489,6 @@ function renderHoldings() {
 
   el.holdingCards.querySelectorAll("[data-edit-holding]").forEach((button) => {
     button.addEventListener("click", () => openHoldingForm(state.holdings.find((holding) => holding.id === button.dataset.editHolding)));
-  });
-  el.holdingCards.querySelectorAll("[data-delete-holding]").forEach((button) => {
-    button.addEventListener("click", () => deleteHolding(button.dataset.deleteHolding));
   });
 }
 
@@ -493,10 +526,10 @@ function renderForecast() {
     .map(
       (row) => `
         <tr>
-          <td>${row.label}</td>
-          <td>${money(row.projected)}</td>
-          <td>${money(row.saleValue)}</td>
-          <td class="${row.diff > 0 ? "profit" : row.diff < 0 ? "loss" : ""}">${signedMoney(row.diff)}</td>
+          <td data-label="ระยะเวลา">${row.label}</td>
+          <td data-label="ราคาคาดการณ์">${money(row.projected)}</td>
+          <td data-label="มูลค่าขายโดยประมาณ">${money(row.saleValue)}</td>
+          <td data-label="ส่วนต่างจากทุน" class="${row.diff > 0 ? "profit" : row.diff < 0 ? "loss" : ""}">${signedMoney(row.diff)}</td>
         </tr>
       `,
     )
@@ -665,7 +698,7 @@ function latestPriceForDate(date) {
 function scheduleNotificationChecks() {
   checkDueNotifications();
   setInterval(checkDueNotifications, 60 * 1000);
-  setInterval(() => refreshLivePrice(false), 30 * 60 * 1000);
+  setInterval(() => syncDataFromSheets(false), 30 * 60 * 1000);
 }
 
 function checkDueNotifications() {
@@ -746,6 +779,147 @@ function importBackup(event) {
   };
   reader.readAsText(file);
   event.target.value = "";
+}
+
+function csvToObjects(csv) {
+  const rows = parseCsv(csv.replace(/^\uFEFF/, ""));
+  if (rows.length < 2) return [];
+  const headers = rows[0].map((header) => header.trim());
+  return rows.slice(1).map((row) =>
+    headers.reduce((object, header, index) => {
+      object[header] = row[index]?.trim() || "";
+      return object;
+    }, {}),
+  );
+}
+
+function parseCsv(csv) {
+  const rows = [];
+  let row = [];
+  let value = "";
+  let inQuotes = false;
+
+  for (let index = 0; index < csv.length; index += 1) {
+    const char = csv[index];
+    const next = csv[index + 1];
+
+    if (char === '"' && inQuotes && next === '"') {
+      value += '"';
+      index += 1;
+    } else if (char === '"') {
+      inQuotes = !inQuotes;
+    } else if (char === "," && !inQuotes) {
+      row.push(value);
+      value = "";
+    } else if ((char === "\n" || char === "\r") && !inQuotes) {
+      if (char === "\r" && next === "\n") index += 1;
+      row.push(value);
+      if (row.some((cellValue) => cellValue.trim() !== "")) rows.push(row);
+      row = [];
+      value = "";
+    } else {
+      value += char;
+    }
+  }
+
+  row.push(value);
+  if (row.some((cellValue) => cellValue.trim() !== "")) rows.push(row);
+  return rows;
+}
+
+function cell(row, key) {
+  return row[key]?.trim() || "";
+}
+
+function parseOptionalNumber(value) {
+  if (!value || value.trim() === "-") return null;
+  const number = parseNumber(value);
+  return number || null;
+}
+
+function parseNumber(value) {
+  if (typeof value === "number") return value;
+  const cleaned = String(value || "")
+    .replace(/[฿,\s]/g, "")
+    .replace(/[^\d.-]/g, "");
+  const number = Number(cleaned);
+  return Number.isFinite(number) ? number : 0;
+}
+
+function parseBoolean(value) {
+  return ["1", "true", "yes", "y", "ใช่", "จริง", "แจ้ง", "checked"].includes(String(value || "").trim().toLowerCase());
+}
+
+function normalizeTime(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  const match = text.match(/^(\d{1,2})[:.](\d{2})/);
+  if (match) return `${match[1].padStart(2, "0")}:${match[2]}`;
+  return text;
+}
+
+function parseDateValue(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+
+  if (/^\d+(\.\d+)?$/.test(text)) {
+    const serial = Number(text);
+    if (serial > 20000) {
+      return todayKey(new Date(Math.round((serial - 25569) * 86400000)));
+    }
+  }
+
+  const iso = text.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
+  if (iso) return normalizeDateParts(Number(iso[1]), Number(iso[2]), Number(iso[3]));
+
+  const slash = text.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})$/);
+  if (slash) return normalizeDateParts(Number(slash[3]), Number(slash[2]), Number(slash[1]));
+
+  const thai = text.match(/^(\d{1,2})\s*([ก-๙.]+)\s*(\d{2,4})$/);
+  if (thai) {
+    const month = thaiMonthNumber(thai[2]);
+    if (month) return normalizeDateParts(Number(thai[3]), month, Number(thai[1]));
+  }
+
+  const parsed = new Date(text);
+  return Number.isNaN(parsed.getTime()) ? "" : todayKey(parsed);
+}
+
+function normalizeDateParts(year, month, day) {
+  const normalizedYear = year > 2400 ? year - 543 : year < 100 ? year + 2000 : year;
+  if (!normalizedYear || !month || !day) return "";
+  return `${normalizedYear}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function thaiMonthNumber(value) {
+  const key = value.replaceAll(".", "").trim();
+  const months = {
+    มค: 1,
+    มกราคม: 1,
+    กพ: 2,
+    กุมภาพันธ์: 2,
+    มีค: 3,
+    มีนาคม: 3,
+    เมย: 4,
+    เมษายน: 4,
+    พค: 5,
+    พฤษภาคม: 5,
+    มิย: 6,
+    มิถุนายน: 6,
+    กค: 7,
+    กรกฎาคม: 7,
+    สค: 8,
+    สิงหาคม: 8,
+    กย: 9,
+    กันยายน: 9,
+    ตค: 10,
+    ตุลาคม: 10,
+    พย: 11,
+    พฤศจิกายน: 11,
+    ธค: 12,
+    ธันวาคม: 12,
+  };
+  return months[key] || 0;
 }
 
 function loadState() {
