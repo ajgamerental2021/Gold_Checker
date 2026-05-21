@@ -130,6 +130,7 @@
                 <h3>รายการที่ถึงวันขาย</h3>
               </div>
               <div id="dueList" class="due-list empty-state">ยังไม่มีรายการที่ถึงวันแจ้งเตือนขาย</div>
+              <button id="saleHistoryButton" class="secondary-button history-button" type="button">ประวัติการขาย</button>
             </section>
           </div>
         </section>
@@ -214,6 +215,13 @@
           </form>
 
           <div id="holdingCards" class="holding-list"></div>
+          <section id="soldSection" class="sold-section hidden">
+            <button id="soldToggle" class="sold-toggle" type="button">
+              <span id="soldToggleLabel">ขายแล้ว</span>
+              <span id="soldToggleIcon">⌄</span>
+            </button>
+            <div id="soldCards" class="holding-list sold-cards hidden"></div>
+          </section>
         </section>
 
         <section id="forecast" class="panel" aria-labelledby="forecast-title">
@@ -265,6 +273,19 @@
           </div>
         </section>
       </main>
+    </div>
+
+    <div id="saleHistoryModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="saleHistoryTitle">
+      <div class="modal-panel">
+        <header class="modal-header">
+          <div>
+            <h2 id="saleHistoryTitle">ประวัติการขาย</h2>
+            <p>รายการขายแล้ว แยกตามวันที่ เดือน และปี</p>
+          </div>
+          <button id="closeSaleHistory" class="modal-close" type="button" aria-label="ปิด">×</button>
+        </header>
+        <div id="saleHistoryContent" class="sale-history-content"></div>
+      </div>
     </div>
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>

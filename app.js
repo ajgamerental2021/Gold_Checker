@@ -32,6 +32,7 @@ let selectedPriceYear = new Date().getFullYear();
 let isAuthenticated = Boolean(localStorage.getItem(AUTH_TOKEN_KEY));
 let sheetDataPromise = null;
 let notificationTimersStarted = false;
+let soldSectionOpen = false;
 
 markRuntimeShell();
 
@@ -52,6 +53,10 @@ const el = {
   importData: document.querySelector("#importData"),
   enableNotifications: document.querySelector("#enableNotifications"),
   notificationStatus: document.querySelector("#notificationStatus"),
+  saleHistoryButton: document.querySelector("#saleHistoryButton"),
+  saleHistoryModal: document.querySelector("#saleHistoryModal"),
+  closeSaleHistory: document.querySelector("#closeSaleHistory"),
+  saleHistoryContent: document.querySelector("#saleHistoryContent"),
   dashSellPrice: document.querySelector("#dashSellPrice"),
   dashBuyPrice: document.querySelector("#dashBuyPrice"),
   dashPriceTime: document.querySelector("#dashPriceTime"),
@@ -82,6 +87,11 @@ const el = {
   notifyDateWrap: document.querySelector("#notifyDateWrap"),
   cancelHolding: document.querySelector("#cancelHolding"),
   holdingCards: document.querySelector("#holdingCards"),
+  soldSection: document.querySelector("#soldSection"),
+  soldToggle: document.querySelector("#soldToggle"),
+  soldToggleLabel: document.querySelector("#soldToggleLabel"),
+  soldToggleIcon: document.querySelector("#soldToggleIcon"),
+  soldCards: document.querySelector("#soldCards"),
   forecastSummary: document.querySelector("#forecastSummary"),
   adviceBox: document.querySelector("#adviceBox"),
   forecastRows: document.querySelector("#forecastRows"),
@@ -132,6 +142,15 @@ function setupEvents() {
 
   el.enableNotifications.addEventListener("click", toggleNotificationAccess);
   el.logoutButton.addEventListener("click", logout);
+  el.saleHistoryButton.addEventListener("click", openSaleHistory);
+  el.closeSaleHistory.addEventListener("click", closeSaleHistory);
+  el.saleHistoryModal.addEventListener("click", (event) => {
+    if (event.target === el.saleHistoryModal) closeSaleHistory();
+  });
+  el.soldToggle.addEventListener("click", () => {
+    soldSectionOpen = !soldSectionOpen;
+    renderSoldHoldings();
+  });
   el.loginForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     await login();
@@ -674,18 +693,19 @@ function render() {
 function renderDashboard() {
   const price = latestPrice();
   const totals = calculatePortfolio();
+  const activeHoldings = activePortfolioHoldings();
   el.dashSellPrice.textContent = price ? money(price.sell) : "-";
   el.dashBuyPrice.textContent = price ? money(price.buy) : "-";
   el.dashPriceTime.textContent = price ? `${formatShortDate(price.date)} ${price.time}` : "ยังไม่มีข้อมูล";
   el.dashWeight.textContent = `${formatNumber(totals.weight)} บาท`;
-  el.dashItemCount.textContent = `${state.holdings.length} รายการ`;
+  el.dashItemCount.textContent = `${activeHoldings.length} รายการ`;
   el.dashUnrealized.textContent = signedMoney(totals.unrealized);
   el.dashUnrealized.classList.toggle("profit", totals.unrealized > 0);
   el.dashUnrealized.classList.toggle("loss", totals.unrealized < 0);
   el.dashUnrealizedCaption.textContent = totals.cost ? `ทุนรวม ${money(totals.cost)}` : "ยังไม่มีรายการทองสะสม";
   el.sourceBadge.textContent = price ? price.source : "-";
 
-  const dueItems = state.holdings.filter((holding) => holding.notifySell && holding.notifyDate && holding.notifyDate <= todayKey());
+  const dueItems = activeHoldings.filter((holding) => holding.notifySell && holding.notifyDate && holding.notifyDate <= todayKey());
   if (!dueItems.length) {
     el.dueList.className = "due-list empty-state";
     el.dueList.textContent = "ยังไม่มีรายการที่ถึงวันแจ้งเตือนขาย";
@@ -766,46 +786,18 @@ function renderPriceFilters() {
 }
 
 function renderHoldings() {
-  if (!state.holdings.length) {
+  const activeHoldings = activePortfolioHoldings();
+
+  if (!activeHoldings.length) {
     el.holdingCards.innerHTML = `<div class="empty-state">ยังไม่มีรายการทองสะสม</div>`;
-    return;
+  } else {
+    const current = latestPrice();
+    const currentSell = current?.sell || 0;
+
+    el.holdingCards.innerHTML = activeHoldings
+      .map((item) => renderHoldingCard(item, currentSell))
+      .join("");
   }
-
-  const current = latestPrice();
-  const currentSell = current?.sell || 0;
-
-  el.holdingCards.innerHTML = state.holdings
-    .map((item) => {
-      const salePrice = item.sellPrice || null;
-      const currentValue = currentSell * item.weightBaht;
-      const realized = salePrice ? salePrice - item.buyPrice : null;
-      const unrealized = currentSell ? currentValue - item.buyPrice : 0;
-      const diff = realized ?? unrealized;
-      const diffLabel = salePrice ? "ส่วนต่างขายแล้ว" : "ส่วนต่างปัจจุบัน";
-      const diffClass = diff > 0 ? "profit" : diff < 0 ? "loss" : "";
-      return `
-        <article class="holding-card">
-          <header>
-            <div>
-              <h4>${escapeHtml(item.name)}</h4>
-              <p>ซื้อวันที่ ${formatShortDate(item.purchaseDate)}</p>
-            </div>
-            <div class="card-actions">
-              <button class="mini-button" type="button" data-edit-holding="${item.id}" title="แก้ไข">✎</button>
-              <button class="mini-button danger-mini-button" type="button" data-delete-holding="${item.id}" title="ลบ">ลบ</button>
-            </div>
-          </header>
-          <div class="holding-stats">
-            <div class="stat"><span>จำนวน</span><strong>${formatNumber(item.weightBaht)} บาท</strong></div>
-            <div class="stat"><span>ราคาซื้อรวม</span><strong>${money(item.buyPrice)}</strong></div>
-            <div class="stat"><span>ราคาขายรวม</span><strong>${salePrice ? money(salePrice) : "-"}</strong></div>
-            <div class="stat"><span>${diffLabel}</span><strong class="${diffClass}">${signedMoney(diff)}</strong></div>
-          </div>
-          <p>${item.notifySell && item.notifyDate ? `แจ้งเตือนขาย ${formatShortDate(item.notifyDate)} เวลา 09.05 และ 12.00 น.` : "ไม่ได้ตั้งแจ้งเตือนขาย"}</p>
-        </article>
-      `;
-    })
-    .join("");
 
   el.holdingCards.querySelectorAll("[data-edit-holding]").forEach((button) => {
     button.addEventListener("click", () => openHoldingForm(state.holdings.find((holding) => holding.id === button.dataset.editHolding)));
@@ -814,6 +806,145 @@ function renderHoldings() {
   el.holdingCards.querySelectorAll("[data-delete-holding]").forEach((button) => {
     button.addEventListener("click", () => deleteHolding(button.dataset.deleteHolding));
   });
+
+  renderSoldHoldings();
+}
+
+function renderHoldingCard(item, currentSell) {
+  const salePrice = item.sellPrice || null;
+  const currentValue = currentSell * item.weightBaht;
+  const realized = salePrice ? salePrice - item.buyPrice : null;
+  const unrealized = currentSell ? currentValue - item.buyPrice : 0;
+  const diff = realized ?? unrealized;
+  const diffLabel = salePrice ? "ส่วนต่างขายแล้ว" : "ส่วนต่างปัจจุบัน";
+  const diffClass = diff > 0 ? "profit" : diff < 0 ? "loss" : "";
+  return `
+    <article class="holding-card">
+      <header>
+        <div>
+          <h4>${escapeHtml(item.name)}</h4>
+          <p>ซื้อวันที่ ${formatShortDate(item.purchaseDate)}</p>
+        </div>
+        <div class="card-actions">
+          <button class="mini-button" type="button" data-edit-holding="${item.id}" title="แก้ไข">✎</button>
+          <button class="mini-button danger-mini-button" type="button" data-delete-holding="${item.id}" title="ลบ">ลบ</button>
+        </div>
+      </header>
+      <div class="holding-stats">
+        <div class="stat"><span>จำนวน</span><strong>${formatNumber(item.weightBaht)} บาท</strong></div>
+        <div class="stat"><span>ราคาซื้อรวม</span><strong>${money(item.buyPrice)}</strong></div>
+        <div class="stat"><span>ราคาขายรวม</span><strong>${salePrice ? money(salePrice) : "-"}</strong></div>
+        <div class="stat"><span>${diffLabel}</span><strong class="${diffClass}">${signedMoney(diff)}</strong></div>
+      </div>
+      <p>${item.notifySell && item.notifyDate ? `แจ้งเตือนขาย ${formatShortDate(item.notifyDate)} เวลา 09.05 และ 12.00 น.` : "ไม่ได้ตั้งแจ้งเตือนขาย"}</p>
+    </article>
+  `;
+}
+
+function renderSoldHoldings() {
+  const sales = saleRecords();
+  el.soldSection.classList.toggle("hidden", !sales.length);
+  if (!sales.length) return;
+
+  el.soldToggleLabel.textContent = `ขายแล้ว (${sales.length} รายการ)`;
+  el.soldToggleIcon.textContent = soldSectionOpen ? "⌃" : "⌄";
+  el.soldCards.classList.toggle("hidden", !soldSectionOpen);
+  if (!soldSectionOpen) {
+    el.soldCards.innerHTML = "";
+    return;
+  }
+
+  el.soldCards.innerHTML = sales.map((sale) => renderSoldCard(sale)).join("");
+}
+
+function renderSoldCard(sale) {
+  const diffClass = sale.diff > 0 ? "profit" : sale.diff < 0 ? "loss" : "";
+  return `
+    <article class="holding-card sold-card">
+      <header>
+        <div>
+          <h4>${escapeHtml(sale.name)}</h4>
+          <p>ขายวันที่ ${formatShortDate(sale.saleDate)}</p>
+        </div>
+      </header>
+      <div class="holding-stats">
+        <div class="stat"><span>จำนวน</span><strong>${formatNumber(sale.weightBaht)} บาท</strong></div>
+        <div class="stat"><span>ราคาซื้อรวม</span><strong>${money(sale.buyPrice)}</strong></div>
+        <div class="stat"><span>ยอดขาย</span><strong>${money(sale.saleValue)}</strong></div>
+        <div class="stat"><span>ส่วนต่างสุทธิ</span><strong class="${diffClass}">${signedMoney(sale.diff)}</strong></div>
+      </div>
+    </article>
+  `;
+}
+
+function openSaleHistory() {
+  renderSaleHistory();
+  el.saleHistoryModal.classList.remove("hidden");
+  document.body.classList.add("modal-open");
+}
+
+function closeSaleHistory() {
+  el.saleHistoryModal.classList.add("hidden");
+  document.body.classList.remove("modal-open");
+}
+
+function renderSaleHistory() {
+  const sales = saleRecords();
+  if (!sales.length) {
+    el.saleHistoryContent.innerHTML = `<div class="empty-state sale-empty">ยังไม่มีประวัติการขาย</div>`;
+    return;
+  }
+
+  const totals = sales.reduce(
+    (summary, sale) => {
+      summary.weight += sale.weightBaht;
+      summary.buy += sale.buyPrice;
+      summary.sale += sale.saleValue;
+      summary.diff += sale.diff;
+      return summary;
+    },
+    { weight: 0, buy: 0, sale: 0, diff: 0 },
+  );
+  const grouped = groupSalesByMonth(sales);
+
+  el.saleHistoryContent.innerHTML = `
+    <div class="sale-summary">
+      <div><span>จำนวนขายแล้ว</span><strong>${formatNumber(totals.weight)} บาท</strong></div>
+      <div><span>ยอดขายรวม</span><strong>${money(totals.sale)}</strong></div>
+      <div><span>ทุนรวมที่ขาย</span><strong>${money(totals.buy)}</strong></div>
+      <div><span>รวมส่วนต่าง</span><strong class="${totals.diff > 0 ? "profit" : totals.diff < 0 ? "loss" : ""}">${signedMoney(totals.diff)}</strong></div>
+    </div>
+    <div class="sale-groups">
+      ${grouped
+        .map(
+          (group) => `
+            <section class="sale-group">
+              <h3>${group.label}</h3>
+              <div class="sale-list">
+                ${group.items.map((sale) => renderSaleHistoryItem(sale)).join("")}
+              </div>
+            </section>
+          `,
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+function renderSaleHistoryItem(sale) {
+  const diffClass = sale.diff > 0 ? "profit" : sale.diff < 0 ? "loss" : "";
+  return `
+    <article class="sale-item">
+      <div>
+        <strong>${escapeHtml(sale.name)}</strong>
+        <p>${formatShortDate(sale.saleDate)} · ${formatNumber(sale.weightBaht)} บาท</p>
+      </div>
+      <div class="sale-item-values">
+        <span>ขาย ${money(sale.saleValue)}</span>
+        <strong class="${diffClass}">${signedMoney(sale.diff)}</strong>
+      </div>
+    </article>
+  `;
 }
 
 function renderForecast() {
@@ -1130,7 +1261,7 @@ function roundedRect(ctx, x, y, width, height, radius) {
 
 function calculatePortfolio() {
   const currentSell = latestPrice()?.sell || 0;
-  return state.holdings.reduce(
+  return activePortfolioHoldings().reduce(
     (totals, item) => {
       const cost = item.buyPrice;
       const marketValue = currentSell * item.weightBaht;
@@ -1142,6 +1273,54 @@ function calculatePortfolio() {
     },
     { weight: 0, cost: 0, marketValue: 0, unrealized: 0 },
   );
+}
+
+function activePortfolioHoldings() {
+  return state.holdings.filter((holding) => !isSoldHolding(holding));
+}
+
+function soldPortfolioHoldings() {
+  return state.holdings.filter(isSoldHolding);
+}
+
+function isSoldHolding(holding) {
+  if (Number(holding.sellPrice) > 0) return true;
+  return Boolean(holding.notifySell && holding.notifyDate && holding.notifyDate < todayKey());
+}
+
+function saleRecords() {
+  return soldPortfolioHoldings()
+    .map((holding) => saleRecordForHolding(holding))
+    .sort((a, b) => `${b.saleDate} ${b.sequence || ""}`.localeCompare(`${a.saleDate} ${a.sequence || ""}`));
+}
+
+function saleRecordForHolding(holding) {
+  const saleDate = holding.notifyDate || todayKey();
+  const priceOnSaleDate = latestPriceForDate(saleDate) || latestPrice();
+  const estimatedSaleValue = priceOnSaleDate ? priceOnSaleDate.sell * holding.weightBaht : 0;
+  const saleValue = Number(holding.sellPrice) > 0 ? Number(holding.sellPrice) : estimatedSaleValue;
+  return {
+    ...holding,
+    saleDate,
+    saleValue,
+    diff: saleValue - Number(holding.buyPrice || 0),
+  };
+}
+
+function groupSalesByMonth(sales) {
+  const groups = [];
+  const byKey = new Map();
+  sales.forEach((sale) => {
+    const parts = dateParts(sale.saleDate);
+    const key = `${parts.year}-${String(parts.month).padStart(2, "0")}`;
+    if (!byKey.has(key)) {
+      const group = { key, label: `${thaiMonthName(parts.month)} ${parts.year + 543}`, items: [] };
+      byKey.set(key, group);
+      groups.push(group);
+    }
+    byKey.get(key).items.push(sale);
+  });
+  return groups.sort((a, b) => b.key.localeCompare(a.key));
 }
 
 function calculateTrend() {
