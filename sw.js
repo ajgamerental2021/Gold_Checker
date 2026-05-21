@@ -1,5 +1,5 @@
-const CACHE_NAME = "aza-gold-v9";
-const ASSETS = ["./", "./index.html", "./styles.css", "./app.js", "./manifest.json"];
+const CACHE_NAME = "aza-gold-v10";
+const ASSETS = ["./", "./index.html", "./styles.css", "./app.js", "./manifest.json", "./assets/logo.png", "./assets/icon-192.png", "./assets/icon-512.png"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS)));

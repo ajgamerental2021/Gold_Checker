@@ -71,13 +71,20 @@ button {
 .brand-mark {
   width: 48px;
   height: 48px;
+  flex: 0 0 48px;
   display: grid;
   place-items: center;
   border-radius: 8px;
-  background: linear-gradient(135deg, #f4c542, #a66f00);
-  color: #111827;
-  font-weight: 900;
-  font-size: 28px;
+  background: #fff;
+  overflow: hidden;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.14);
+}
+
+.brand-mark img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: contain;
 }
 
 .brand h1,
@@ -312,6 +319,24 @@ button {
   background: #fff;
   color: var(--ink);
   border-color: var(--line);
+}
+
+.secondary-button.notification-on {
+  background: #dcfce7;
+  color: #166534;
+  border-color: #86efac;
+}
+
+.secondary-button.notification-off {
+  background: #fff7ed;
+  color: #9a3412;
+  border-color: #fed7aa;
+}
+
+.secondary-button.notification-denied {
+  background: #fff1f0;
+  color: var(--red);
+  border-color: #fecdca;
 }
 
 .danger-button {

@@ -1,5 +1,6 @@
 const STORAGE_KEY = "aza-gold-state-v1";
 const NOTIFICATION_LOG_KEY = "aza-gold-notification-log-v1";
+const NOTIFICATION_ENABLED_KEY = "aza-gold-notifications-enabled-v1";
 const AUTH_TOKEN_KEY = "aza-gold-auth-token-v1";
 const REMEMBER_LOGIN_KEY = "aza-gold-remember-login-v1";
 const API_BASE_URL_KEY = "aza-gold-api-base-url-v1";
@@ -129,7 +130,7 @@ function setupEvents() {
     await saveHoldingFromForm();
   });
 
-  el.enableNotifications.addEventListener("click", requestNotificationAccess);
+  el.enableNotifications.addEventListener("click", toggleNotificationAccess);
   el.logoutButton.addEventListener("click", logout);
   el.loginForm.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -183,6 +184,9 @@ async function login() {
 }
 
 function logout() {
+  const confirmed = window.confirm("ยืนยัน Logout ออกจาก AzA Gold หรือไม่?");
+  if (!confirmed) return;
+
   localStorage.removeItem(AUTH_TOKEN_KEY);
   localStorage.removeItem(STORAGE_KEY);
   localStorage.removeItem(NOTIFICATION_LOG_KEY);
@@ -1193,6 +1197,8 @@ function scheduleNotificationChecks() {
 }
 
 function checkDueNotifications() {
+  if (!notificationsEnabled()) return;
+
   const now = new Date();
   const date = todayKey(now);
   const hhmm = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
@@ -1224,7 +1230,15 @@ function notify(title, body) {
   notifySystem(title, body);
 }
 
-async function requestNotificationAccess() {
+async function toggleNotificationAccess() {
+  if (notificationsEnabled()) {
+    localStorage.setItem(NOTIFICATION_ENABLED_KEY, "0");
+    await cancelNativeNotifications();
+    await updateNotificationStatus();
+    showToast("ปิดแจ้งเตือนแล้ว");
+    return;
+  }
+
   const nativeNotifications = getNativeNotifications();
 
   try {
@@ -1235,7 +1249,9 @@ async function requestNotificationAccess() {
       await updateNotificationStatus();
 
       if (permission.display === "granted") {
+        localStorage.setItem(NOTIFICATION_ENABLED_KEY, "1");
         await scheduleNativeNotifications();
+        await updateNotificationStatus();
         await notifySystem("AzA Gold", "เปิดแจ้งเตือนแล้ว");
         showToast("เปิดแจ้งเตือนบน Android แล้ว");
       } else {
@@ -1251,6 +1267,7 @@ async function requestNotificationAccess() {
     }
 
     const result = await Notification.requestPermission();
+    if (result === "granted") localStorage.setItem(NOTIFICATION_ENABLED_KEY, "1");
     updateNotificationStatus();
     if (result === "granted") {
       await notifySystem("AzA Gold", "เปิดแจ้งเตือนแล้ว");
@@ -1267,26 +1284,47 @@ async function requestNotificationAccess() {
 
 async function updateNotificationStatus() {
   const nativeNotifications = getNativeNotifications();
+  const enabled = notificationsEnabled();
+
   if (nativeNotifications) {
     try {
       const permission = await nativeNotifications.checkPermissions();
-      el.notificationStatus.textContent =
-        permission.display === "granted" ? "Native Notification เปิดอยู่" : "Native Notification ยังไม่ได้เปิด";
+      if (permission.display === "granted" && enabled) {
+        setNotificationToggleState("enabled", "🔔 เปิดแจ้งเตือนอยู่", "Native Notification เปิดอยู่");
+      } else if (permission.display === "granted") {
+        setNotificationToggleState("off", "🔕 เปิดแจ้งเตือน", "Native Notification ปิดอยู่ในแอพ");
+      } else {
+        setNotificationToggleState("off", "🔕 เปิดแจ้งเตือน", "Native Notification ยังไม่ได้เปิด");
+      }
     } catch {
-      el.notificationStatus.textContent = "Native Notification ยังไม่ได้เปิด";
+      setNotificationToggleState("off", "🔕 เปิดแจ้งเตือน", "Native Notification ยังไม่ได้เปิด");
     }
     return;
   }
 
   if (!supportsWebNotifications()) {
-    el.notificationStatus.textContent = webNotificationUnsupportedMessage();
+    setNotificationToggleState("unsupported", "🔕 ไม่รองรับแจ้งเตือน", webNotificationUnsupportedMessage());
+  } else if (Notification.permission === "granted" && enabled) {
+    setNotificationToggleState("enabled", "🔔 เปิดแจ้งเตือนอยู่", "Notification เปิดอยู่");
   } else if (Notification.permission === "granted") {
-    el.notificationStatus.textContent = "Notification เปิดอยู่";
+    setNotificationToggleState("off", "🔕 เปิดแจ้งเตือน", "Notification ปิดอยู่ในแอพ");
   } else if (Notification.permission === "denied") {
-    el.notificationStatus.textContent = "Notification ถูกปิดในเบราว์เซอร์";
+    setNotificationToggleState("denied", "🚫 เปิดไม่ได้", "Notification ถูกปิดในเบราว์เซอร์");
   } else {
-    el.notificationStatus.textContent = "Notification ยังไม่ได้เปิด";
+    setNotificationToggleState("off", "🔕 เปิดแจ้งเตือน", "Notification ยังไม่ได้เปิด");
   }
+}
+
+function setNotificationToggleState(stateName, buttonText, statusText) {
+  el.enableNotifications.textContent = buttonText;
+  el.enableNotifications.classList.toggle("notification-on", stateName === "enabled");
+  el.enableNotifications.classList.toggle("notification-off", stateName === "off");
+  el.enableNotifications.classList.toggle("notification-denied", stateName === "denied" || stateName === "unsupported");
+  el.notificationStatus.textContent = statusText;
+}
+
+function notificationsEnabled() {
+  return localStorage.getItem(NOTIFICATION_ENABLED_KEY) === "1";
 }
 
 function supportsWebNotifications() {
@@ -1325,6 +1363,8 @@ async function ensureNativeNotificationChannel(nativeNotifications) {
 }
 
 async function notifySystem(title, body) {
+  if (!notificationsEnabled()) return;
+
   const nativeNotifications = getNativeNotifications();
   if (nativeNotifications) {
     try {
@@ -1368,14 +1408,12 @@ async function scheduleNativeNotifications() {
   const permission = await nativeNotifications.checkPermissions();
   if (permission.display !== "granted") return;
 
-  const pending = await nativeNotifications.getPending();
-  const scheduledIds = pending.notifications
-    .map((notification) => notification.id)
-    .filter((id) => id >= NATIVE_NOTIFICATION_ID_MIN && id <= NATIVE_NOTIFICATION_ID_MAX);
-  if (scheduledIds.length) {
-    await nativeNotifications.cancel({ notifications: scheduledIds.map((id) => ({ id })) });
+  if (!notificationsEnabled()) {
+    await cancelNativeNotifications();
+    return;
   }
 
+  await cancelNativeNotifications();
   const totals = calculatePortfolio();
   const notifications = [
     {
@@ -1404,6 +1442,19 @@ async function scheduleNativeNotifications() {
     });
 
   await nativeNotifications.schedule({ notifications });
+}
+
+async function cancelNativeNotifications() {
+  const nativeNotifications = getNativeNotifications();
+  if (!nativeNotifications) return;
+
+  const pending = await nativeNotifications.getPending();
+  const scheduledIds = pending.notifications
+    .map((notification) => notification.id)
+    .filter((id) => id >= NATIVE_NOTIFICATION_ID_MIN && id <= NATIVE_NOTIFICATION_ID_MAX);
+  if (scheduledIds.length) {
+    await nativeNotifications.cancel({ notifications: scheduledIds.map((id) => ({ id })) });
+  }
 }
 
 function syncNativeNotificationSchedule() {
