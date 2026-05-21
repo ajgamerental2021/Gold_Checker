@@ -4,7 +4,8 @@
   "private": true,
   "description": "AzA Gold web and Android app",
   "scripts": {
-    "check": "node --check app.js",
+    "start": "node server.js",
+    "check": "node --check app.js && node --check server.js",
     "build:web": "node scripts/sync-web-assets.js",
     "android:sync": "npm run build:web && npx cap sync android",
     "android:apk": "npm run android:sync && cd android && ./gradlew assembleDebug"

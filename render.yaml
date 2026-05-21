@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: aza-gold-checker
+    runtime: node
+    plan: starter
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: APP_USERNAME
+        sync: false
+      - key: APP_PASSWORD
+        sync: false
+      - key: AUTH_SECRET
+        generateValue: true
+      - key: APPS_SCRIPT_URL
+        sync: false
+      - key: GOOGLE_SHEET_ID
+        sync: false
+      - key: HOLDINGS_GID
+        sync: false
+      - key: DAILY_PRICES_GID
+        sync: false

@@ -351,6 +351,7 @@ label {
 }
 
 input[type="text"],
+input[type="password"],
 input[type="number"],
 input[type="date"],
 select {
@@ -361,6 +362,43 @@ select {
   padding: 0 10px;
   color: var(--ink);
   background: #fff;
+}
+
+.login-screen {
+  min-height: 100vh;
+  min-height: 100svh;
+  padding: calc(24px + var(--safe-top)) 18px calc(24px + var(--safe-bottom));
+  display: grid;
+  place-items: center;
+  background: #121722;
+}
+
+.login-panel {
+  width: min(100%, 420px);
+  display: grid;
+  gap: 16px;
+  padding: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.24);
+}
+
+.login-brand {
+  margin-bottom: 4px;
+}
+
+.login-brand p {
+  color: var(--muted);
+}
+
+.login-remember {
+  margin-top: 0;
+  font-weight: 700;
+}
+
+.login-panel .primary-button {
+  width: 100%;
 }
 
 .filter-row {

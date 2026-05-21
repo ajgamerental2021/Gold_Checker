@@ -9,7 +9,32 @@
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <div class="app-shell">
+    <section id="loginScreen" class="login-screen">
+      <form id="loginForm" class="login-panel">
+        <div class="brand login-brand">
+          <div class="brand-mark">A</div>
+          <div>
+            <h1>AzA Gold</h1>
+            <p>เข้าสู่ระบบเพื่อดูข้อมูลทอง</p>
+          </div>
+        </div>
+        <label>
+          ชื่อบัญชี
+          <input id="loginUsername" type="text" autocomplete="username" required />
+        </label>
+        <label>
+          รหัสผ่าน
+          <input id="loginPassword" type="password" autocomplete="current-password" required />
+        </label>
+        <label class="check-row login-remember">
+          <input id="rememberLogin" type="checkbox" />
+          จำชื่อบัญชีและรหัสผ่าน
+        </label>
+        <button class="primary-button" type="submit">Login</button>
+      </form>
+    </section>
+
+    <div id="appShell" class="app-shell hidden">
       <aside class="sidebar">
         <div class="brand">
           <div class="brand-mark">A</div>
@@ -41,6 +66,9 @@
         <div class="sidebar-footer">
           <button id="enableNotifications" class="secondary-button" type="button">
             เปิดแจ้งเตือน
+          </button>
+          <button id="logoutButton" class="secondary-button" type="button">
+            Logout
           </button>
           <p id="notificationStatus">Notification ยังไม่ได้เปิด</p>
         </div>

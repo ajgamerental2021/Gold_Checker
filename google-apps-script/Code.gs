@@ -1,6 +1,3 @@
-const SPREADSHEET_ID = "1i-619OKgmIHnBWapurp-_VfAx0dqh_cgcJBo-FHdeXw";
-const HOLDINGS_GID = 1394429920;
-const DAILY_PRICES_GID = 484644725;
 const HOLDING_HEADERS = ["ลำดับ", "รายการ", "จำนวนบาท", "ราคาซื้อรวม", "ราคาขายรวม", "วันที่ซื้อ", "แจ้งเตือนขาย", "วันที่แจ้งเตือน"];
 const DAILY_PRICE_HEADERS = ["วันที่", "เวลา", "รับซื้อ", "ขาย", "แหล่งข้อมูล"];
 
@@ -9,11 +6,27 @@ function doPost(e) {
     const payload = JSON.parse(e.postData.contents || "{}");
     return handlePayload_(payload);
   } catch (error) {
-    return jsonResponse({ ok: false, error: String(error && error.message ? error.message : error) });
+    return jsonResponse({ ok: false, error: errorMessage_(error) });
   }
 }
 
+function doGet(e) {
+  if (e && e.parameter && e.parameter.payload) {
+    try {
+      return handlePayload_(JSON.parse(e.parameter.payload));
+    } catch (error) {
+      return jsonResponse({ ok: false, error: errorMessage_(error) });
+    }
+  }
+
+  return jsonResponse({ ok: true, app: "AzA Gold Sheet API" });
+}
+
 function handlePayload_(payload) {
+  if (payload.action === "readAll") {
+    return readAll_();
+  }
+
   if (payload.action === "upsertDailyPrice") {
     return upsertDailyPrice_(payload.record || {});
   }
@@ -29,9 +42,27 @@ function handlePayload_(payload) {
   return jsonResponse({ ok: false, error: "Unknown action" });
 }
 
+function readAll_() {
+  try {
+    const holdingsSheet = sheetByGid_(holdingGid_());
+    const pricesSheet = sheetByGid_(dailyPricesGid_());
+    ensureHeaders_(holdingsSheet, HOLDING_HEADERS);
+    ensureHeaders_(pricesSheet, DAILY_PRICE_HEADERS);
+
+    return jsonResponse({
+      ok: true,
+      action: "readAll",
+      holdings: rowsToObjects_(holdingsSheet),
+      prices: rowsToObjects_(pricesSheet),
+    });
+  } catch (error) {
+    return jsonResponse({ ok: false, error: errorMessage_(error) });
+  }
+}
+
 function upsertDailyPrice_(record) {
   try {
-    const sheet = sheetByGid_(DAILY_PRICES_GID);
+    const sheet = sheetByGid_(dailyPricesGid_());
     ensureHeaders_(sheet, DAILY_PRICE_HEADERS);
     const rowIndex = findRowByDate_(sheet, record.date);
     const values = [
@@ -50,13 +81,13 @@ function upsertDailyPrice_(record) {
 
     return jsonResponse({ ok: true, action: "upsertDailyPrice", row: rowIndex > 0 ? rowIndex : sheet.getLastRow() });
   } catch (error) {
-    return jsonResponse({ ok: false, error: String(error && error.message ? error.message : error) });
+    return jsonResponse({ ok: false, error: errorMessage_(error) });
   }
 }
 
 function upsertHolding_(record) {
   try {
-    const sheet = sheetByGid_(HOLDINGS_GID);
+    const sheet = sheetByGid_(holdingGid_());
     ensureHeaders_(sheet, HOLDING_HEADERS);
     const sequence = record.sequence || nextSequence_(sheet);
     const rowIndex = findRowByValue_(sheet, 1, sequence);
@@ -79,13 +110,13 @@ function upsertHolding_(record) {
 
     return jsonResponse({ ok: true, action: "upsertHolding", sequence: sequence, row: rowIndex > 0 ? rowIndex : sheet.getLastRow() });
   } catch (error) {
-    return jsonResponse({ ok: false, error: String(error && error.message ? error.message : error) });
+    return jsonResponse({ ok: false, error: errorMessage_(error) });
   }
 }
 
 function deleteHolding_(record) {
   try {
-    const sheet = sheetByGid_(HOLDINGS_GID);
+    const sheet = sheetByGid_(holdingGid_());
     ensureHeaders_(sheet, HOLDING_HEADERS);
     const rowIndex = findRowByValue_(sheet, 1, record.sequence);
 
@@ -96,27 +127,29 @@ function deleteHolding_(record) {
     sheet.deleteRow(rowIndex);
     return jsonResponse({ ok: true, action: "deleteHolding", deleted: true, sequence: record.sequence, row: rowIndex });
   } catch (error) {
-    return jsonResponse({ ok: false, error: String(error && error.message ? error.message : error) });
+    return jsonResponse({ ok: false, error: errorMessage_(error) });
   }
-}
-
-function doGet(e) {
-  if (e && e.parameter && e.parameter.payload) {
-    try {
-      return handlePayload_(JSON.parse(e.parameter.payload));
-    } catch (error) {
-      return jsonResponse({ ok: false, error: String(error && error.message ? error.message : error) });
-    }
-  }
-
-  return jsonResponse({ ok: true, app: "AzA Gold Sheet Writer" });
 }
 
 function sheetByGid_(gid) {
-  const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const spreadsheet = SpreadsheetApp.openById(scriptProperty_("SPREADSHEET_ID"));
   const sheet = spreadsheet.getSheets().find((candidate) => candidate.getSheetId() === gid);
   if (!sheet) throw new Error("Sheet gid not found: " + gid);
   return sheet;
+}
+
+function scriptProperty_(key) {
+  const value = PropertiesService.getScriptProperties().getProperty(key);
+  if (!value) throw new Error("Missing Script Property: " + key);
+  return value;
+}
+
+function holdingGid_() {
+  return Number(scriptProperty_("HOLDINGS_GID"));
+}
+
+function dailyPricesGid_() {
+  return Number(scriptProperty_("DAILY_PRICES_GID"));
 }
 
 function ensureHeaders_(sheet, headers) {
@@ -125,6 +158,18 @@ function ensureHeaders_(sheet, headers) {
   if (!hasHeaders) {
     sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
   }
+}
+
+function rowsToObjects_(sheet) {
+  if (sheet.getLastRow() < 2) return [];
+  const values = sheet.getRange(1, 1, sheet.getLastRow(), sheet.getLastColumn()).getDisplayValues();
+  const headers = values[0].map((header) => String(header || "").trim());
+  return values.slice(1).map((row) =>
+    headers.reduce((object, header, index) => {
+      object[header] = String(row[index] || "").trim();
+      return object;
+    }, {}),
+  );
 }
 
 function findRowByDate_(sheet, dateText) {
@@ -177,6 +222,10 @@ function normalizeDate_(value) {
 
 function pad_(value) {
   return String(value).padStart(2, "0");
+}
+
+function errorMessage_(error) {
+  return String(error && error.message ? error.message : error);
 }
 
 function jsonResponse(payload) {

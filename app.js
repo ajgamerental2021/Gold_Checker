@@ -1,10 +1,9 @@
 const STORAGE_KEY = "aza-gold-state-v1";
 const NOTIFICATION_LOG_KEY = "aza-gold-notification-log-v1";
-const GOOGLE_SHEET_ID = "1i-619OKgmIHnBWapurp-_VfAx0dqh_cgcJBo-FHdeXw";
-const HOLDINGS_GID = "1394429920";
-const DAILY_PRICES_GID = "484644725";
-const SHEET_WRITE_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbx2SBfa1psYi0g6ZYn9HWAixSK2bTwlbZ-HsxYe4NB8_kYAecqU0oMwLBO5BaXRzvzq/exec";
-const SHEET_WRITE_WEB_APP_URL_KEY = "aza-gold-sheet-write-web-app-url-v2";
+const AUTH_TOKEN_KEY = "aza-gold-auth-token-v1";
+const REMEMBER_LOGIN_KEY = "aza-gold-remember-login-v1";
+const API_BASE_URL_KEY = "aza-gold-api-base-url-v1";
+const DEFAULT_REMOTE_API_BASE_URL = "https://aza-gold-checker.onrender.com";
 const NATIVE_NOTIFICATION_CHANNEL_ID = "aza-gold-alerts";
 const NATIVE_NOTIFICATION_ID_MIN = 860000;
 const NATIVE_NOTIFICATION_ID_MAX = 999999;
@@ -29,10 +28,20 @@ let toastTimer;
 let externalTrend = { points: [], status: "idle", thbRate: null, source: "CoinGecko PAX Gold", updatedAt: "" };
 let selectedPriceMonth = new Date().getMonth() + 1;
 let selectedPriceYear = new Date().getFullYear();
+let isAuthenticated = Boolean(localStorage.getItem(AUTH_TOKEN_KEY));
+let sheetDataPromise = null;
+let notificationTimersStarted = false;
 
 markRuntimeShell();
 
 const el = {
+  loginScreen: document.querySelector("#loginScreen"),
+  appShell: document.querySelector("#appShell"),
+  loginForm: document.querySelector("#loginForm"),
+  loginUsername: document.querySelector("#loginUsername"),
+  loginPassword: document.querySelector("#loginPassword"),
+  rememberLogin: document.querySelector("#rememberLogin"),
+  logoutButton: document.querySelector("#logoutButton"),
   tabs: document.querySelectorAll(".tab"),
   panels: document.querySelectorAll(".panel"),
   pageTitle: document.querySelector("#pageTitle"),
@@ -87,15 +96,15 @@ function markRuntimeShell() {
 }
 
 function init() {
-  captureSheetWriteUrl();
+  captureApiBaseUrl();
   el.todayLabel.textContent = formatFullDate(new Date());
   setupEvents();
-  updateNotificationStatus();
-  render();
-  syncDataFromSheets(false);
-  loadExternalGoldTrend(false);
-  registerServiceWorker();
-  scheduleNotificationChecks();
+  restoreRememberedLogin();
+  if (isAuthenticated) {
+    startAuthenticatedApp();
+  } else {
+    setAuthenticated(false);
+  }
 }
 
 function setupEvents() {
@@ -121,6 +130,11 @@ function setupEvents() {
   });
 
   el.enableNotifications.addEventListener("click", requestNotificationAccess);
+  el.logoutButton.addEventListener("click", logout);
+  el.loginForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    await login();
+  });
 
   el.exportData.addEventListener("click", exportBackup);
   el.importData.addEventListener("change", importBackup);
@@ -134,8 +148,139 @@ function setupEvents() {
   });
   window.addEventListener("resize", renderCharts);
   document.addEventListener("visibilitychange", () => {
-    if (!document.hidden) checkDueNotifications();
+    if (!document.hidden && isAuthenticated) checkDueNotifications();
   });
+}
+
+async function login() {
+  const username = el.loginUsername.value.trim();
+  const password = el.loginPassword.value;
+  const submitButton = el.loginForm.querySelector('button[type="submit"]');
+
+  try {
+    submitButton.disabled = true;
+    const result = await apiFetch("/api/login", {
+      method: "POST",
+      skipAuth: true,
+      body: { username, password },
+    });
+
+    localStorage.setItem(AUTH_TOKEN_KEY, result.token);
+    if (el.rememberLogin.checked) {
+      localStorage.setItem(REMEMBER_LOGIN_KEY, JSON.stringify({ username, password }));
+    } else {
+      localStorage.removeItem(REMEMBER_LOGIN_KEY);
+    }
+
+    isAuthenticated = true;
+    startAuthenticatedApp();
+  } catch (error) {
+    console.error(error);
+    showToast("ชื่อบัญชีหรือรหัสผ่านไม่ถูกต้อง");
+  } finally {
+    submitButton.disabled = false;
+  }
+}
+
+function logout() {
+  localStorage.removeItem(AUTH_TOKEN_KEY);
+  localStorage.removeItem(STORAGE_KEY);
+  localStorage.removeItem(NOTIFICATION_LOG_KEY);
+  state = { prices: [], holdings: [] };
+  sheetDataPromise = null;
+  isAuthenticated = false;
+  setAuthenticated(false);
+  render();
+}
+
+function restoreRememberedLogin() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(REMEMBER_LOGIN_KEY));
+    if (!saved) return;
+    el.loginUsername.value = saved.username || "";
+    el.loginPassword.value = saved.password || "";
+    el.rememberLogin.checked = Boolean(saved.username || saved.password);
+  } catch {
+    localStorage.removeItem(REMEMBER_LOGIN_KEY);
+  }
+}
+
+function startAuthenticatedApp() {
+  setAuthenticated(true);
+  updateNotificationStatus();
+  render();
+  syncDataFromSheets(false);
+  loadExternalGoldTrend(false);
+  registerServiceWorker();
+  scheduleNotificationChecks();
+}
+
+function setAuthenticated(value) {
+  isAuthenticated = value;
+  el.loginScreen.classList.toggle("hidden", value);
+  el.appShell.classList.toggle("hidden", !value);
+  if (!value) {
+    el.loginPassword.focus();
+  }
+}
+
+async function apiFetch(path, options = {}) {
+  const headers = { ...(options.headers || {}) };
+  const request = {
+    method: options.method || "GET",
+    cache: "no-store",
+    headers,
+  };
+
+  if (!options.skipAuth) {
+    const token = localStorage.getItem(AUTH_TOKEN_KEY);
+    if (token) headers.Authorization = `Bearer ${token}`;
+  }
+
+  if (options.body !== undefined) {
+    headers["Content-Type"] = "application/json";
+    request.body = JSON.stringify(options.body);
+  }
+
+  const response = await fetch(`${getApiBaseUrl()}${path}`, request);
+  const text = await response.text();
+  let result = {};
+  try {
+    result = text ? JSON.parse(text) : {};
+  } catch {
+    throw new Error("API did not return JSON");
+  }
+
+  if (response.status === 401 && !options.skipAuth) {
+    localStorage.removeItem(AUTH_TOKEN_KEY);
+    isAuthenticated = false;
+    setAuthenticated(false);
+    throw new Error("Session expired");
+  }
+
+  if (!response.ok || result.ok === false) {
+    throw new Error(result.error || `API returned ${response.status}`);
+  }
+
+  return result;
+}
+
+function captureApiBaseUrl() {
+  const params = new URLSearchParams(window.location.search);
+  const url = params.get("apiBaseUrl");
+  if (!url) return;
+  localStorage.setItem(API_BASE_URL_KEY, url.trim().replace(/\/$/, ""));
+  history.replaceState({}, "", window.location.pathname);
+}
+
+function getApiBaseUrl() {
+  const saved = (localStorage.getItem(API_BASE_URL_KEY) || "").trim().replace(/\/$/, "");
+  if (saved) return saved;
+
+  const isNativeApp =
+    location.protocol === "capacitor:" || (location.protocol === "https:" && location.hostname === "localhost");
+  const isGithubPages = location.hostname.endsWith("github.io");
+  return isNativeApp || isGithubPages ? DEFAULT_REMOTE_API_BASE_URL : "";
 }
 
 async function refreshLivePrice(showResult, writeToSheet = false) {
@@ -158,17 +303,17 @@ async function refreshLivePrice(showResult, writeToSheet = false) {
 async function syncDataFromSheets(showResult) {
   try {
     setLoadingPrice(true);
-    const [holdingResult, priceResult] = await Promise.allSettled([fetchSheetHoldings(), fetchSheetPrices()]);
+    const sheetResult = await fetchSheetData();
     let synced = false;
     let fallbackWriteResult = null;
 
-    if (holdingResult.status === "fulfilled" && holdingResult.value.length) {
-      state.holdings = holdingResult.value;
+    if (Array.isArray(sheetResult.holdings)) {
+      state.holdings = sheetResult.holdings;
       synced = true;
     }
 
-    if (priceResult.status === "fulfilled" && priceResult.value.length) {
-      state.prices = priceResult.value;
+    if (Array.isArray(sheetResult.prices)) {
+      state.prices = sheetResult.prices;
       synced = true;
     }
 
@@ -200,57 +345,14 @@ async function syncDataFromSheets(showResult) {
   }
 }
 
-async function fetchSheetHoldings() {
-  const rows = await fetchSheetRows(HOLDINGS_GID);
-  return rows
-    .map((row, index) => {
-      const name = cell(row, "รายการ");
-      const weightBaht = parseNumber(cell(row, "จำนวนบาท"));
-      const buyPrice = parseNumber(cell(row, "ราคาซื้อรวม"));
-      if (!name || !weightBaht || !buyPrice) return null;
-      return {
-        id: `sheet-holding-${cell(row, "ลำดับ") || index + 1}`,
-        sequence: cell(row, "ลำดับ") || String(index + 1),
-        name,
-        weightBaht,
-        buyPrice,
-        sellPrice: parseOptionalNumber(cell(row, "ราคาขายรวม")),
-        purchaseDate: parseDateValue(cell(row, "วันที่ซื้อ")) || todayKey(),
-        notifySell: parseBoolean(cell(row, "แจ้งเตือนขาย")),
-        notifyDate: parseDateValue(cell(row, "วันที่แจ้งเตือน")) || "",
-        createdAt: new Date().toISOString(),
-        source: "Google Sheet",
-      };
-    })
-    .filter(Boolean);
-}
-
-async function fetchSheetPrices() {
-  const rows = await fetchSheetRows(DAILY_PRICES_GID);
-  return rows
-    .map((row, index) => {
-      const date = parseDateValue(cell(row, "วันที่"));
-      const buy = parseNumber(cell(row, "รับซื้อ"));
-      const sell = parseNumber(cell(row, "ขาย"));
-      if (!date || !buy || !sell) return null;
-      return {
-        id: `sheet-price-${index + 1}`,
-        date,
-        time: normalizeTime(cell(row, "เวลา")) || nowTime(),
-        buy,
-        sell,
-        source: cell(row, "แหล่งข้อมูล") || "Google Sheet",
-        createdAt: new Date().toISOString(),
-      };
-    })
-    .filter(Boolean)
-    .sort((a, b) => `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`));
-}
-
-async function fetchSheetRows(gid) {
-  const url = `https://docs.google.com/spreadsheets/d/${GOOGLE_SHEET_ID}/export?format=csv&gid=${gid}&cachebust=${Date.now()}`;
-  const csv = await fetchText(url);
-  return csvToObjects(csv);
+async function fetchSheetData() {
+  if (!isAuthenticated) return { holdings: [], prices: [] };
+  if (!sheetDataPromise) {
+    sheetDataPromise = apiFetch("/api/data").finally(() => {
+      sheetDataPromise = null;
+    });
+  }
+  return sheetDataPromise;
 }
 
 async function loadExternalGoldTrend(showResult) {
@@ -308,34 +410,23 @@ function convertTroyOunceUsdToThaiGoldBaht(usdPerTroyOunce, thbRate) {
 }
 
 async function writeDailyPriceToSheet(price) {
-  const url = getSheetWriteUrl();
-  if (!url) return { configured: false, sent: false };
-
-  const payload = {
-    action: "upsertDailyPrice",
-    sheetId: GOOGLE_SHEET_ID,
-    gid: DAILY_PRICES_GID,
-    record: {
+  const result = await apiFetch("/api/prices", {
+    method: "POST",
+    body: {
       date: price.date,
       time: price.time,
       buy: price.buy,
       sell: price.sell,
       source: price.source,
     },
-  };
-
-  return sendSheetWritePayload(payload);
+  });
+  return { configured: true, sent: true, verified: true, result: result.result || result };
 }
 
 async function writeHoldingToSheet(item) {
-  const url = getSheetWriteUrl();
-  if (!url) return { configured: false, sent: false };
-
-  const payload = {
-    action: "upsertHolding",
-    sheetId: GOOGLE_SHEET_ID,
-    gid: HOLDINGS_GID,
-    record: {
+  const result = await apiFetch("/api/holdings", {
+    method: "POST",
+    body: {
       sequence: item.sequence,
       name: item.name,
       weightBaht: item.weightBaht,
@@ -345,59 +436,13 @@ async function writeHoldingToSheet(item) {
       notifySell: item.notifySell,
       notifyDate: item.notifyDate,
     },
-  };
-
-  return sendSheetWritePayload(payload);
+  });
+  return { configured: true, sent: true, verified: true, result: result.result || result };
 }
 
 async function deleteHoldingFromSheet(item) {
-  const url = getSheetWriteUrl();
-  if (!url) return { configured: false, sent: false };
-
-  const payload = {
-    action: "deleteHolding",
-    sheetId: GOOGLE_SHEET_ID,
-    gid: HOLDINGS_GID,
-    record: {
-      sequence: item.sequence,
-      name: item.name,
-    },
-  };
-
-  return sendSheetWritePayload(payload);
-}
-
-async function sendSheetWritePayload(payload) {
-  const url = getSheetWriteUrl();
-  const separator = url.includes("?") ? "&" : "?";
-  const requestUrl = `${url}${separator}payload=${encodeURIComponent(JSON.stringify(payload))}&cachebust=${Date.now()}`;
-  const response = await fetch(requestUrl, { method: "GET", cache: "no-store" });
-  const text = await response.text();
-  let result;
-
-  try {
-    result = JSON.parse(text);
-  } catch {
-    throw new Error("Apps Script did not return JSON. Check deployment access.");
-  }
-
-  if (!response.ok || result.ok === false) {
-    throw new Error(result.error || `Apps Script returned ${response.status}`);
-  }
-
-  if (!isExpectedSheetWriteResult(payload.action, result)) {
-    throw new Error(`Apps Script deployment did not handle ${payload.action}. Redeploy Code.gs as a new Web App version.`);
-  }
-
-  return { configured: true, sent: true, verified: true, result };
-}
-
-function isExpectedSheetWriteResult(action, result) {
-  if (!result || result.ok !== true) return false;
-  if (action === "upsertDailyPrice") return Object.prototype.hasOwnProperty.call(result, "row");
-  if (action === "upsertHolding") return Object.prototype.hasOwnProperty.call(result, "sequence");
-  if (action === "deleteHolding") return Object.prototype.hasOwnProperty.call(result, "deleted");
-  return false;
+  const result = await apiFetch(`/api/holdings/${encodeURIComponent(item.sequence)}`, { method: "DELETE" });
+  return { configured: true, sent: true, verified: true, result: result.result || result };
 }
 
 async function fetchLiveThaiGoldPrice() {
@@ -608,12 +653,9 @@ async function deleteHolding(id) {
 
 function sheetWriteErrorMessage(error, prefix) {
   const message = String(error?.message || "");
-  if (message.includes("Redeploy Code.gs")) {
-    return `${prefix} แต่ Apps Script ยังเป็นเวอร์ชันเก่า`;
-  }
-  if (message.includes("did not return JSON")) {
-    return `${prefix} แต่ Apps Script URL ยังไม่พร้อมใช้งาน`;
-  }
+  if (message.includes("Session expired")) return "Session หมดอายุ กรุณา Login ใหม่";
+  if (message.includes("Missing")) return `${prefix} แต่ Render ยังตั้งค่า Environment ไม่ครบ`;
+  if (message.includes("Apps Script")) return `${prefix} แต่ Apps Script ยังไม่พร้อมใช้งาน`;
   return `${prefix} แต่ส่งเข้า Sheet ไม่สำเร็จ`;
 }
 
@@ -1139,9 +1181,15 @@ function thaiMonthName(month) {
 }
 
 function scheduleNotificationChecks() {
+  if (notificationTimersStarted) return;
+  notificationTimersStarted = true;
   checkDueNotifications();
-  setInterval(checkDueNotifications, 60 * 1000);
-  setInterval(() => syncDataFromSheets(false), 30 * 60 * 1000);
+  setInterval(() => {
+    if (isAuthenticated) checkDueNotifications();
+  }, 60 * 1000);
+  setInterval(() => {
+    if (isAuthenticated) syncDataFromSheets(false);
+  }, 30 * 60 * 1000);
 }
 
 function checkDueNotifications() {
@@ -1408,19 +1456,6 @@ function importBackup(event) {
   };
   reader.readAsText(file);
   event.target.value = "";
-}
-
-function captureSheetWriteUrl() {
-  const params = new URLSearchParams(window.location.search);
-  const url = params.get("sheetWriteUrl");
-  if (url) {
-    localStorage.setItem(SHEET_WRITE_WEB_APP_URL_KEY, url.trim());
-    history.replaceState({}, "", window.location.pathname);
-  }
-}
-
-function getSheetWriteUrl() {
-  return (localStorage.getItem(SHEET_WRITE_WEB_APP_URL_KEY) || SHEET_WRITE_WEB_APP_URL).trim();
 }
 
 function nextHoldingSequence() {

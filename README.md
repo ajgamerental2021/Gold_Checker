@@ -1,14 +1,55 @@
 # AzA Gold
 
-Web app สำหรับติดตามราคาทองและพอร์ตทองสะสม
+Web app และ Android app สำหรับติดตามราคาทองและพอร์ตทองสะสม
 
-## Run
+## Run Local
 
 ```bash
-python3 -m http.server 4173
+npm install
+npm start
 ```
 
 เปิดที่ `http://127.0.0.1:4173`
+
+ต้องตั้ง Environment Variables ก่อนใช้งาน API:
+
+```text
+APP_USERNAME=
+APP_PASSWORD=
+AUTH_SECRET=
+APPS_SCRIPT_URL=
+GOOGLE_SHEET_ID=
+HOLDINGS_GID=
+DAILY_PRICES_GID=
+```
+
+## Render
+
+โปรเจกต์นี้มี `render.yaml` สำหรับสร้าง Web Service บน Render แล้ว ให้ตั้งค่า Environment Variables ใน Render Dashboard เท่านั้น ห้ามใส่ค่าเหล่านี้ลงในโค้ด:
+
+- `APP_USERNAME`
+- `APP_PASSWORD`
+- `AUTH_SECRET`
+- `APPS_SCRIPT_URL`
+- `GOOGLE_SHEET_ID`
+- `HOLDINGS_GID`
+- `DAILY_PRICES_GID`
+
+หลัง deploy แล้ว Web App จะคุยกับ Render API ก่อนเสมอ และฝั่ง frontend/APK จะไม่เห็น Google Sheet ID หรือ Apps Script URL
+
+## Google Apps Script
+
+ไฟล์ Apps Script อยู่ที่ `google-apps-script/Code.gs`
+
+ตั้ง Script Properties ใน Apps Script:
+
+```text
+SPREADSHEET_ID
+HOLDINGS_GID
+DAILY_PRICES_GID
+```
+
+จากนั้น deploy เป็น Web App แล้วนำ URL ไปใส่ใน Render env `APPS_SCRIPT_URL`
 
 ## Android APK
 
@@ -27,49 +68,21 @@ export ANDROID_HOME=/opt/homebrew/share/android-commandlinetools
 npm run android:apk
 ```
 
-## Google Sheet Sync
-
-แอพอ่านข้อมูลจาก Google Sheet นี้:
-
-```text
-https://docs.google.com/spreadsheets/d/1i-619OKgmIHnBWapurp-_VfAx0dqh_cgcJBo-FHdeXw/edit?usp=sharing
-```
-
-- `gid=1394429920` สำหรับทองที่สะสม
-  - Header: `ลำดับ,รายการ,จำนวนบาท,ราคาซื้อรวม,ราคาขายรวม,วันที่ซื้อ,แจ้งเตือนขาย,วันที่แจ้งเตือน`
-- `gid=484644725` สำหรับราคาทองรายวัน
-  - Header: `วันที่,เวลา,รับซื้อ,ขาย,แหล่งข้อมูล`
-
-ถ้า Google Sheet ยังไม่มีแถวราคาของวันนี้ แอพจะดึงราคาสดโดยประมาณและบันทึกไว้ในเครื่องเป็น fallback เมื่อเปิดแอพ
-
-### เขียนราคากลับเข้า Google Sheet
-
-เว็บ/Android เขียนกลับเข้า Sheet ผ่าน Google Apps Script Web App นี้ ซึ่งฝังไว้ในแอพแล้ว:
-
-```text
-https://script.google.com/macros/s/AKfycbz62Dw-RJkEBuQ_7lzJEdqJQBGulf1Ro7iQ6WlLmwh0gB3fM9bXl5OCdI2qIVLhkqtm/exec
-```
-
-เมื่อ Google Sheet `gid=484644725` ยังไม่มีราคาของวันนี้ แอพจะดึงราคาสด fallback แล้วส่งเข้า Sheet แบบ upsert ตามวันที่ จึงไม่เพิ่มซ้ำเมื่อกด refresh หลายครั้ง
-
-เมื่อเพิ่มหรือแก้ไข `ทองที่สะสม` แอพจะส่งเข้า Google Sheet `gid=1394429920` ผ่าน action `upsertHolding` โดยใช้คอลัมน์ `ลำดับ` เป็นตัวระบุแถว
-
-หลังแก้ `google-apps-script/Code.gs` ต้อง deploy Web App version ใหม่ใน Apps Script เพื่อให้ endpoint เดิมรองรับ action ล่าสุด
-
 ## Features
 
+- Login ก่อนเข้าใช้งาน และคง session ไว้จนกด Logout
+- ตัวเลือกจำชื่อบัญชีและรหัสผ่านในเครื่องผู้ใช้
 - Dashboard ราคาทองวันนี้, น้ำหนักทองสะสม, และส่วนต่างจากราคาปัจจุบัน
-- ราคาทองรายวันพร้อมประวัติย้อนหลัง
-- เพิ่มและแก้ไขรายการทองสะสม โดยราคาซื้อ/ราคาขายเป็นยอดรวมของรายการนั้น
-- ราคาขายในรายการสะสมเว้นว่างได้ และคำนวณส่วนต่างจากมูลค่าตามน้ำหนักทองจริงเมื่อมีราคาปัจจุบัน
+- ราคาทองรายวันพร้อมตัวกรองเดือน/ปี และประวัติย้อนหลัง
+- เพิ่ม แก้ไข และลบรายการทองสะสม พร้อมซิงค์ Google Sheet ผ่าน Render
 - ตั้งแจ้งเตือนขายรายรายการ เวลา 09.05 และ 12.00 น. ในวันที่กำหนด
 - แจ้งเตือนสรุปราคาทองและส่วนต่างทุกวันเวลา 09.00 น.
 - Forecast ระยะ 15 วัน, 1 เดือน, 3 เดือน, 6 เดือน, 1 ปี, 3 ปี, 5 ปี, 10 ปี พร้อมกราฟและตาราง
 - กราฟแนวโน้มภายนอก 90 วันจาก CoinGecko PAX Gold แปลงเป็นราคาต่อทอง 1 บาทด้วย USD/THB
 - Export/Import backup เป็น JSON
 
-## Notes
+## Security Notes
 
-- ข้อมูลเก็บใน `localStorage` ของเบราว์เซอร์
-- Notification ทำงานเมื่อเปิดแอพไว้ในเบราว์เซอร์ และต้องกดอนุญาต Notification ก่อน
-- ราคาทองสดเป็นราคาไทยโดยประมาณจาก XAU/USD และ USD/THB ยังไม่ใช่ราคาประกาศสมาคมค้าทองคำโดยตรง
+- ห้ามฝากข้อมูลลับไว้ใน GitHub Pages หรือไฟล์ frontend เพราะผู้ใช้ดู source ได้เสมอ
+- ถ้าเคย push Sheet ID หรือ Apps Script URL ไปแล้ว ควร rotate Apps Script deployment URL และปรับสิทธิ์ Sheet ให้เป็นส่วนตัว
+- ปุ่มจำรหัสผ่านเก็บค่าไว้ในเครื่องของผู้ใช้เท่านั้น เหมาะกับเครื่องส่วนตัว
