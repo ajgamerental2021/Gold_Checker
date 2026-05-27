@@ -1,4 +1,4 @@
-const CACHE_NAME = "aza-gold-v11";
+const CACHE_NAME = "aza-gold-v12";
 const ASSETS = ["./", "./index.html", "./styles.css", "./app.js", "./manifest.json", "./assets/logo.png", "./assets/icon-192.png", "./assets/icon-512.png"];
 
 self.addEventListener("install", (event) => {

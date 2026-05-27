@@ -21,6 +21,7 @@ APPS_SCRIPT_URL=
 GOOGLE_SHEET_ID=
 HOLDINGS_GID=
 DAILY_PRICES_GID=
+CRON_SECRET=
 ```
 
 ## Render
@@ -34,8 +35,24 @@ DAILY_PRICES_GID=
 - `GOOGLE_SHEET_ID`
 - `HOLDINGS_GID`
 - `DAILY_PRICES_GID`
+- `CRON_SECRET`
 
 หลัง deploy แล้ว Web App จะคุยกับ Render API ก่อนเสมอ และฝั่ง frontend/APK จะไม่เห็น Google Sheet ID หรือ Apps Script URL
+
+Render backend จะพยายามอัพเดทราคาทองเข้า Sheet วันละ 4 เวลาใน timezone Asia/Bangkok:
+
+```text
+06:00, 12:00, 18:00, 24:00
+```
+
+หมายเหตุ: ถ้าใช้ Render plan ที่ service หลับได้ ควรสร้าง Render Cron Jobs เพิ่มให้เรียก endpoint นี้ตามเวลาข้างบนเพื่อความแน่นอน:
+
+```text
+GET /api/cron/update-price?token=CRON_SECRET&slot=06:00
+GET /api/cron/update-price?token=CRON_SECRET&slot=12:00
+GET /api/cron/update-price?token=CRON_SECRET&slot=18:00
+GET /api/cron/update-price?token=CRON_SECRET&slot=24:00
+```
 
 ## Google Apps Script
 
@@ -73,7 +90,7 @@ npm run android:apk
 - Login ก่อนเข้าใช้งาน และคง session ไว้จนกด Logout
 - ตัวเลือกจำชื่อบัญชีและรหัสผ่านในเครื่องผู้ใช้
 - Dashboard ราคาทองวันนี้, น้ำหนักทองสะสม, และส่วนต่างจากราคาปัจจุบัน
-- ราคาทองรายวันพร้อมตัวกรองเดือน/ปี และประวัติย้อนหลัง
+- ราคาทองรายวันพร้อมตัวกรองเดือน/ปี ประวัติย้อนหลัง และรอบอัพเดท 06:00, 12:00, 18:00, 24:00
 - เพิ่ม แก้ไข และลบรายการทองสะสม พร้อมซิงค์ Google Sheet ผ่าน Render
 - ตั้งแจ้งเตือนขายรายรายการ เวลา 09.05 และ 12.00 น. ในวันที่กำหนด
 - แจ้งเตือนสรุปราคาทองและส่วนต่างทุกวันเวลา 09.00 น.

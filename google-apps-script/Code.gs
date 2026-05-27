@@ -64,7 +64,7 @@ function upsertDailyPrice_(record) {
   try {
     const sheet = sheetByGid_(dailyPricesGid_());
     ensureHeaders_(sheet, DAILY_PRICE_HEADERS);
-    const rowIndex = findRowByDate_(sheet, record.date);
+    const rowIndex = findRowByDateTime_(sheet, record.date, record.time);
     const values = [
       record.date || "",
       record.time || "",
@@ -172,15 +172,24 @@ function rowsToObjects_(sheet) {
   );
 }
 
-function findRowByDate_(sheet, dateText) {
+function findRowByDateTime_(sheet, dateText, timeText) {
   if (!dateText || sheet.getLastRow() < 2) return -1;
-  const values = sheet.getRange(2, 1, sheet.getLastRow() - 1, 1).getDisplayValues();
+  const values = sheet.getRange(2, 1, sheet.getLastRow() - 1, 2).getDisplayValues();
+  const normalizedDate = normalizeDate_(dateText);
+  const normalizedTime = normalizeTime_(timeText);
   for (let index = 0; index < values.length; index += 1) {
-    if (normalizeDate_(values[index][0]) === normalizeDate_(dateText)) {
+    if (normalizeDate_(values[index][0]) === normalizedDate && normalizeTime_(values[index][1]) === normalizedTime) {
       return index + 2;
     }
   }
   return -1;
+}
+
+function normalizeTime_(value) {
+  const text = String(value || "").trim();
+  const match = text.match(/^(\d{1,2})[:.](\d{2})/);
+  if (match) return pad_(match[1]) + ":" + match[2];
+  return text;
 }
 
 function findRowByValue_(sheet, column, value) {

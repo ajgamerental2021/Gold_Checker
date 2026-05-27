@@ -6,6 +6,11 @@ const path = require("path");
 const PORT = Number(process.env.PORT || 4173);
 const PUBLIC_DIR = __dirname;
 const TOKEN_TTL_MS = 1000 * 60 * 60 * 24 * 365 * 20;
+const THAI_GOLD_BAHT_GRAMS = 15.244;
+const TROY_OUNCE_GRAMS = 31.1034768;
+const GOLD_PURITY = 0.965;
+const PRICE_UPDATE_TIMES = ["06:00", "12:00", "18:00", "24:00"];
+const PRICE_UPDATE_WINDOW_MINUTES = 10;
 const HOLDING_HEADERS = ["ลำดับ", "รายการ", "จำนวนบาท", "ราคาซื้อรวม", "ราคาขายรวม", "วันที่ซื้อ", "แจ้งเตือนขาย", "วันที่แจ้งเตือน"];
 const DAILY_PRICE_HEADERS = ["วันที่", "เวลา", "รับซื้อ", "ขาย", "แหล่งข้อมูล"];
 
@@ -42,6 +47,7 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, () => {
   console.log(`AzA Gold server listening on ${PORT}`);
+  startPriceScheduler();
 });
 
 async function handleApi(req, res, url) {
@@ -59,6 +65,18 @@ async function handleApi(req, res, url) {
       return;
     }
     sendJson(res, 401, { ok: false, error: "Invalid username or password" });
+    return;
+  }
+
+  if (url.pathname === "/api/cron/update-price" && ["GET", "POST"].includes(req.method)) {
+    if (!isValidCronRequest(req, url)) {
+      sendJson(res, 401, { ok: false, error: "Unauthorized cron request" });
+      return;
+    }
+    const slot = scheduledPriceSlot(url.searchParams.get("slot"));
+    const recordDate = url.searchParams.get("date") || defaultDateForSlot(slot);
+    const record = await updateGoldPriceAtSlot(recordDate, slot, "Render scheduled update");
+    sendJson(res, 200, { ok: true, record });
     return;
   }
 
@@ -98,6 +116,199 @@ async function handleApi(req, res, url) {
   }
 
   sendJson(res, 404, { ok: false, error: "Not found" });
+}
+
+function startPriceScheduler() {
+  if (env("ENABLE_PRICE_SCHEDULER") === "0") return;
+  setTimeout(runScheduledPriceUpdateIfDue, 5000);
+  setInterval(runScheduledPriceUpdateIfDue, 60 * 1000);
+}
+
+let scheduledPriceUpdateInFlight = false;
+const scheduledPriceUpdateLog = new Set();
+
+async function runScheduledPriceUpdateIfDue() {
+  if (scheduledPriceUpdateInFlight) return;
+  const slot = currentBangkokSlot();
+  if (!slot) return;
+
+  const key = `${slot.date}-${slot.time}`;
+  if (scheduledPriceUpdateLog.has(key)) return;
+  scheduledPriceUpdateLog.add(key);
+  scheduledPriceUpdateInFlight = true;
+
+  try {
+    const record = await updateGoldPriceAtSlot(slot.date, slot.time, "Render scheduled update");
+    console.log(`Updated scheduled gold price ${record.date} ${record.time}`);
+  } catch (error) {
+    scheduledPriceUpdateLog.delete(key);
+    console.error(`Scheduled gold price update failed: ${error.message}`);
+  } finally {
+    scheduledPriceUpdateInFlight = false;
+  }
+}
+
+async function updateGoldPriceAtSlot(date, time, sourcePrefix) {
+  const live = await fetchLiveThaiGoldPrice(date, time, sourcePrefix);
+  await callAppsScript("upsertDailyPrice", live);
+  return live;
+}
+
+async function fetchLiveThaiGoldPrice(date, time, sourcePrefix) {
+  const gold = await fetchGoldSpotUsd();
+  const fx = await fetchUsdThbRate();
+  const spotUsd = Number(gold.price);
+  const thbRate = Number(fx.rate);
+  if (!spotUsd || !thbRate) throw new Error("Live price payload missing");
+
+  const estimatedThaiBaht = spotUsd * thbRate * (THAI_GOLD_BAHT_GRAMS / TROY_OUNCE_GRAMS) * GOLD_PURITY;
+  const sell = roundToNearest(estimatedThaiBaht, 50);
+  const buy = Math.max(0, sell - 100);
+
+  return {
+    date,
+    time,
+    buy,
+    sell,
+    spotUsd,
+    thbRate,
+    source: `${sourcePrefix} · ${gold.source}`,
+    createdAt: new Date().toISOString(),
+    updatedAt: gold.updatedAt || fx.updatedAt || new Date().toISOString(),
+  };
+}
+
+async function fetchGoldSpotUsd() {
+  const providers = [
+    async () => {
+      const data = await fetchJson("https://api.gold-api.com/price/XAU");
+      return {
+        price: Number(data.price),
+        source: "Gold API estimate",
+        updatedAt: data.updatedAt,
+      };
+    },
+    async () => {
+      const data = await fetchJson("https://api.coingecko.com/api/v3/simple/price?ids=pax-gold,tether-gold&vs_currencies=usd");
+      const prices = [data["pax-gold"]?.usd, data["tether-gold"]?.usd].map(Number).filter(Boolean);
+      return {
+        price: prices.reduce((sum, price) => sum + price, 0) / prices.length,
+        source: "CoinGecko estimate",
+        updatedAt: new Date().toISOString(),
+      };
+    },
+  ];
+  return firstSuccessful(providers, "gold spot");
+}
+
+async function fetchUsdThbRate() {
+  const providers = [
+    async () => {
+      const data = await fetchJson("https://api.frankfurter.app/latest?from=USD&to=THB");
+      return {
+        rate: Number(data.rates?.THB),
+        updatedAt: data.date ? `${data.date}T00:00:00Z` : new Date().toISOString(),
+      };
+    },
+    async () => {
+      const data = await fetchJson("https://open.er-api.com/v6/latest/USD");
+      return {
+        rate: Number(data.rates?.THB),
+        updatedAt: data.time_last_update_utc,
+      };
+    },
+  ];
+  return firstSuccessful(providers, "USD/THB");
+}
+
+async function firstSuccessful(providers, label) {
+  const errors = [];
+  for (const provider of providers) {
+    try {
+      const result = await provider();
+      if (Object.values(result).some((value) => Number.isNaN(value))) {
+        throw new Error(`Invalid ${label} payload`);
+      }
+      return result;
+    } catch (error) {
+      errors.push(error);
+    }
+  }
+  throw new Error(`Cannot fetch ${label}: ${errors.map((error) => error.message).join("; ")}`);
+}
+
+async function fetchJson(url) {
+  const response = await fetch(url, { cache: "no-store" });
+  if (!response.ok) throw new Error(`${url} returned ${response.status}`);
+  return response.json();
+}
+
+function currentBangkokSlot(date = new Date()) {
+  const parts = bangkokParts(date);
+  const minuteOfDay = Number(parts.hour) * 60 + Number(parts.minute);
+  for (const time of PRICE_UPDATE_TIMES) {
+    const slotMinute = time === "24:00" ? 0 : timeToMinutes(time);
+    if (minuteOfDay >= slotMinute && minuteOfDay < slotMinute + PRICE_UPDATE_WINDOW_MINUTES) {
+      return {
+        date: time === "24:00" ? bangkokDateOffset(date, -1) : parts.date,
+        time,
+      };
+    }
+  }
+  return null;
+}
+
+function scheduledPriceSlot(value) {
+  const time = normalizeTime(value || "");
+  return PRICE_UPDATE_TIMES.includes(time) ? time : currentBangkokSlot()?.time || bangkokNowTime();
+}
+
+function defaultDateForSlot(slot) {
+  return slot === "24:00" ? bangkokDateOffset(new Date(), -1) : bangkokParts(new Date()).date;
+}
+
+function isValidCronRequest(req, url) {
+  const secret = env("CRON_SECRET");
+  if (!secret) return false;
+  const header = req.headers["x-cron-secret"] || "";
+  const token = url.searchParams.get("token") || "";
+  return safeEqual(header, secret) || safeEqual(token, secret);
+}
+
+function bangkokParts(date) {
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Bangkok",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  });
+  const parts = Object.fromEntries(formatter.formatToParts(date).map((part) => [part.type, part.value]));
+  return {
+    date: `${parts.year}-${parts.month}-${parts.day}`,
+    hour: parts.hour,
+    minute: parts.minute,
+  };
+}
+
+function bangkokDateOffset(date, offsetDays) {
+  return bangkokParts(new Date(date.getTime() + offsetDays * 86400000)).date;
+}
+
+function bangkokNowTime(date = new Date()) {
+  const parts = bangkokParts(date);
+  return `${parts.hour}:${parts.minute}`;
+}
+
+function timeToMinutes(time) {
+  const [hour, minute] = String(time).split(":").map(Number);
+  return hour * 60 + minute;
+}
+
+function roundToNearest(value, nearest) {
+  return Math.round(value / nearest) * nearest;
 }
 
 function serveStatic(res, pathname) {

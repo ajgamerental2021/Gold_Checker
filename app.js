@@ -565,7 +565,8 @@ async function fetchText(url) {
 }
 
 function upsertDailyPrice(record) {
-  const existingIndex = state.prices.findIndex((item) => item.date === record.date);
+  const recordTime = normalizeTime(record.time);
+  const existingIndex = state.prices.findIndex((item) => item.date === record.date && normalizeTime(item.time) === recordTime);
   if (existingIndex >= 0) {
     state.prices[existingIndex] = { ...state.prices[existingIndex], ...record, id: state.prices[existingIndex].id };
   } else {
